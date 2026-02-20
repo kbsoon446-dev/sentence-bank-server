@@ -1,0 +1,8 @@
+cmd
+node server.js
+
+웹에서 하기 주소입력
+http://localhost:8000/segment-title?videoId=AN0QJ4m48Fw&start=452&end=458
+
+
+

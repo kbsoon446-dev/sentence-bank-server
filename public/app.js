@@ -1,0 +1,617 @@
+let player = null;
+let loopTimer = null;
+
+let segments = [];
+let currentIndex = -1;
+
+// review state
+let reviewQueue = [];
+let reviewActive = false;
+let revealShown = false;
+
+function $(id) { return document.getElementById(id); }
+
+function setStatus(msg) { $("status").textContent = msg; }
+
+function fmt(sec) {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function parseTimeToSeconds(s) {
+  const t = String(s || "").trim();
+  if (!t) return NaN;
+  if (/^\d+(\.\d+)?$/.test(t)) return Number(t);
+
+  // hh:mm:ss or mm:ss
+  const parts = t.split(":").map(x => x.trim());
+  if (parts.length === 2) {
+    const mm = Number(parts[0]);
+    const ss = Number(parts[1]);
+    if (!Number.isFinite(mm) || !Number.isFinite(ss)) return NaN;
+    return mm * 60 + ss;
+  }
+  if (parts.length === 3) {
+    const hh = Number(parts[0]);
+    const mm = Number(parts[1]);
+    const ss = Number(parts[2]);
+    if (!Number.isFinite(hh) || !Number.isFinite(mm) || !Number.isFinite(ss)) return NaN;
+    return hh * 3600 + mm * 60 + ss;
+  }
+  return NaN;
+}
+
+function parseVideoId(input) {
+  const s = String(input || "").trim();
+  if (!s) return "";
+
+  if (/^[a-zA-Z0-9_-]{11}$/.test(s)) return s;
+
+  const m1 = s.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+  if (m1) return m1[1];
+
+  const m2 = s.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
+  if (m2) return m2[1];
+
+  const m3 = s.match(/\/embed\/([a-zA-Z0-9_-]{11})/);
+  if (m3) return m3[1];
+
+  return "";
+}
+
+function clearLoopTimer() {
+  if (loopTimer) {
+    clearInterval(loopTimer);
+    loopTimer = null;
+  }
+}
+
+function startLoopGuard(seg) {
+  clearLoopTimer();
+  loopTimer = setInterval(() => {
+    if (!player || typeof player.getCurrentTime !== "function") return;
+    const t = player.getCurrentTime();
+    if (t >= seg.end) {
+      if ($("loop").checked) {
+        player.seekTo(seg.start, true);
+      } else {
+        player.pauseVideo();
+        clearLoopTimer();
+      }
+    }
+  }, 120);
+}
+
+function ensurePlayerReady(videoId, startSec = 0) {
+  return new Promise((resolve) => {
+    const tryResolve = () => {
+      if (player && typeof player.loadVideoById === "function") return resolve();
+      setTimeout(tryResolve, 100);
+    };
+
+    if (player) return tryResolve();
+
+    // player created in onYouTubeIframeAPIReady
+    tryResolve();
+  });
+}
+
+async function playSegmentByIndex(i) {
+  if (i < 0 || i >= segments.length) return;
+  currentIndex = i;
+  const seg = segments[i];
+
+  //$("now").textContent = `[${seg.videoId}] ${fmt(seg.start)}–${fmt(seg.end)}  ·  ${seg.text}`;
+
+  await ensurePlayerReady(seg.videoId, seg.start);
+
+  const rate = parseFloat($("speed").value);
+  try { player.setPlaybackRate(rate); } catch {}
+
+  const currentId = player.getVideoData?.().video_id;
+  if (currentId !== seg.videoId) {
+    player.loadVideoById({ videoId: seg.videoId, startSeconds: seg.start });
+  } else {
+    player.seekTo(seg.start, true);
+  }
+  player.playVideo();
+
+  startLoopGuard(seg);
+}
+
+function pause() {
+  if (!player) return;
+  player.pauseVideo();
+  clearLoopTimer();
+}
+
+async function fetchSegments() {
+  setStatus("loading…");
+  const sort = $("sort").value;
+  const filter = $("filter").value;
+  const q = $("q").value.trim();
+
+  const url = new URL("https://sentence-bank.onrender.com/api/segments", window.location.origin);
+  url.searchParams.set("sort", sort);
+  url.searchParams.set("filter", filter);
+  if (q) url.searchParams.set("q", q);
+
+  const res = await fetch(url.toString());
+  const data = await res.json();
+  segments = data.segments || [];
+
+  renderStats();
+  renderList();
+
+  setStatus("ready");
+  refreshReviewInfo();
+}
+
+function renderStats() {
+  const total = segments.length;
+  const due = segments.filter(s => new Date(s.dueAt || s.createdAt).getTime() <= Date.now()).length;
+  $("stats").textContent = `Total: ${total}   ·   Due now: ${due}`;
+}
+
+function renderList() {
+  const list = $("list");
+  list.innerHTML = "";
+
+  segments.forEach((seg, i) => {
+    const el = document.createElement("div");
+    el.className = "item";
+
+    const title = seg.text || "(no captions)";
+    const meta = `Video: ${seg.videoId} · ${fmt(seg.start)}–${fmt(seg.end)} · Level: ${seg.level ?? 0} · Due: ${new Date(seg.dueAt).toLocaleString()}`;
+
+    el.innerHTML = `
+      <div class="itemTop">
+        <div>
+          <div class="itemTitle">${escapeHtml(title)}</div>
+          <div class="itemMeta">${escapeHtml(meta)}</div>
+          ${seg.note ? `<div class="itemMeta">Note: ${escapeHtml(seg.note)}</div>` : ""}
+        </div>
+        <div class="itemBtns">
+          <button class="btn primary" data-act="play">Play</button>
+          <button class="btn" data-act="review">Review</button>
+          <button class="btn" data-act="del">Delete</button>
+          <button class="btn" data-act="edit">Edit</button> <!-- ✅ 수정 버튼 추가 -->
+        </div>
+      </div>
+    `;
+
+    el.querySelector('[data-act="play"]').onclick = () => playSegmentByIndex(i);
+    el.querySelector('[data-act="review"]').onclick = () => startSingleReview(seg.id);
+    el.querySelector('[data-act="del"]').onclick = async () => {
+      if (!confirm("Delete this segment?")) return;
+      await fetch(`https://sentence-bank.onrender.com/api/segments${encodeURIComponent(seg.id)}`, { method: "DELETE" });
+      await fetchSegments();
+    }
+    // =======================
+    // Edit 버튼 클릭 처리
+    // =======================
+    el.querySelector('[data-act="edit"]').onclick = async () => {
+
+      // 1️⃣ 현재 자막 수정
+      const newText = prompt("Edit subtitle:", seg.text || "");
+      if (newText === null) return; // 취소 누르면 종료
+
+      // 2️⃣ 메모 수정
+      const newNote = prompt("Edit note:", seg.note || "");
+      if (newNote === null) return;
+
+      // 3️⃣ 서버에 수정 요청 보내기
+      const res = await fetch(`https://sentence-bank.onrender.com/api/segments${encodeURIComponent(seg.id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: newText,
+          note: newNote
+        })
+      });
+
+      if (!res.ok) {
+        alert("Update failed");
+        return;
+      }
+
+      // 4️⃣ 수정 후 리스트 다시 불러오기
+      await fetchSegments();
+    };
+    ;
+
+    list.appendChild(el);
+  });
+}
+
+function escapeHtml(s) {
+  return String(s || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+async function fetchCaptionIntoText() {
+  const youtube = $("youtube").value.trim();
+  const videoId = parseVideoId(youtube);
+
+  const start = parseTimeToSeconds($("start").value);
+  const end = parseTimeToSeconds($("end").value);
+
+  if (!videoId || !Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    alert("Please check URL/videoId and start/end time.");
+    return;
+  }
+
+  setStatus("fetching captions…");
+  const url = new URL("/api/caption", window.location.origin);
+  url.searchParams.set("videoId", videoId);
+  url.searchParams.set("start", String(start));
+  url.searchParams.set("end", String(end));
+
+  const res = await fetch(url.toString());
+  const data = await res.json();
+
+  $("text").value = data.text || "";
+  setStatus("ready");
+}
+
+async function saveSegment() {
+  const youtube = $("youtube").value.trim();
+  const videoId = parseVideoId(youtube);
+
+  const start = parseTimeToSeconds($("start").value);
+  const end = parseTimeToSeconds($("end").value);
+  const text = $("text").value.trim();
+  const note = $("note").value.trim();
+
+  if (!videoId || !Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    alert("Please check URL/videoId and start/end time.");
+    return;
+  }
+
+  setStatus("saving…");
+  const res = await fetch("https://sentence-bank.onrender.com/api/segments", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ youtube, videoId, start, end, text, note })
+  });
+  const data = await res.json();
+  if (data.error) {
+    alert(data.error);
+    setStatus("ready");
+    return;
+  }
+
+  // clear inputs (keep video url for convenience)
+  $("start").value = "";
+  $("end").value = "";
+  $("text").value = "";
+  $("note").value = "";
+
+  await fetchSegments();
+  setStatus("ready");
+}
+
+function refreshReviewInfo() {
+  const dueNow = segments.filter(s => new Date(s.dueAt || s.createdAt).getTime() <= Date.now());
+  $("reviewInfo").textContent = `Due now: ${dueNow.length}`;
+}
+
+function showReviewBox(show) {
+  $("reviewBox").classList.toggle("hidden", !show);
+}
+
+function setReviewTextHidden() {
+  revealShown = false;
+  $("reviewText").textContent = "(hidden)";
+}
+
+function revealReviewText(text) {
+  revealShown = true;
+  $("reviewText").textContent = text || "(no captions)";
+}
+
+async function startDueReview() {
+  reviewActive = true;
+  showReviewBox(true);
+
+  // get a fresh due list in due order
+  const url = new URL("https://sentence-bank.onrender.com/api/segments", window.location.origin);
+  url.searchParams.set("sort", "due");
+  url.searchParams.set("filter", "due");
+  const res = await fetch(url.toString());
+  const data = await res.json();
+  reviewQueue = (data.segments || []);
+
+  if (!reviewQueue.length) {
+    $("reviewMeta").textContent = "No due items 🎉";
+    setReviewTextHidden();
+    return;
+  }
+
+  await loadReviewItem(0);
+}
+
+async function startSingleReview(id) {
+  reviewActive = true;
+  showReviewBox(true);
+
+  // use current in-memory segments to find the item
+  const seg = segments.find(s => s.id === id);
+  reviewQueue = seg ? [seg] : [];
+  if (!reviewQueue.length) return;
+
+  await loadReviewItem(0);
+}
+
+async function loadReviewItem(i) {
+  if (i < 0 || i >= reviewQueue.length) {
+    $("reviewMeta").textContent = "Done 🎉";
+    setReviewTextHidden();
+    return;
+  }
+
+  const seg = reviewQueue[i];
+  $("reviewMeta").textContent = `Item ${i + 1} / ${reviewQueue.length}  ·  Level ${seg.level ?? 0}`;
+  setReviewTextHidden();
+
+  // also play it
+  // ensure current list index points to it (if present)
+  const idxInList = segments.findIndex(s => s.id === seg.id);
+  if (idxInList >= 0) currentIndex = idxInList;
+
+  await playSegmentByIndex(idxInList >= 0 ? idxInList : 0);
+
+  // store current review pointer
+  $("reviewBox").dataset.ri = String(i);
+  $("reviewBox").dataset.rid = seg.id;
+}
+
+async function gradeCurrent(grade) {
+  const i = Number($("reviewBox").dataset.ri || "0");
+  const id = $("reviewBox").dataset.rid;
+  if (!id) return;
+
+  // send grade
+  await fetch(`/api/review/${encodeURIComponent(id)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ grade })
+  });
+
+  // refresh list and move next
+  await fetchSegments();
+
+  if (reviewQueue.length === 1) {
+    $("reviewMeta").textContent = "Saved ✔";
+    return;
+  }
+
+  await loadReviewItem(i + 1);
+}
+
+function stopReview() {
+  reviewActive = false;
+  reviewQueue = [];
+  showReviewBox(false);
+}
+
+// keyboard shortcuts
+document.addEventListener("keydown", (e) => {
+  if (["Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.code)) {
+    e.preventDefault();
+  }
+
+  if (e.code === "ArrowRight") {
+    if (!segments.length) return;
+    const next = currentIndex < 0 ? 0 : (currentIndex + 1) % segments.length;
+    playSegmentByIndex(next);
+  }
+  if (e.code === "ArrowLeft") {
+    if (!segments.length) return;
+    const prev = currentIndex < 0 ? 0 : (currentIndex - 1 + segments.length) % segments.length;
+    playSegmentByIndex(prev);
+  }
+  if (e.code === "ArrowDown") {
+    if (currentIndex >= 0) playSegmentByIndex(currentIndex);
+  }
+  if (e.code === "Space") {
+    if (!player) return;
+    const state = player.getPlayerState();
+    if (state === YT.PlayerState.PLAYING) pause();
+    else if (currentIndex >= 0) playSegmentByIndex(currentIndex);
+  }
+
+  if (!reviewActive) return;
+
+  if (e.key === "1") gradeCurrent("again");
+  if (e.key === "2") gradeCurrent("hard");
+  if (e.key === "3") gradeCurrent("good");
+  if (e.key === "4") gradeCurrent("easy");
+});
+
+// UI handlers
+$("btnFetch").onclick = fetchCaptionIntoText;
+$("btnSave").onclick = saveSegment;
+$("btnRefresh").onclick = fetchSegments;
+
+$("btnPlay").onclick = () => {
+  if (currentIndex >= 0) playSegmentByIndex(currentIndex);
+};
+$("btnPause").onclick = pause;
+
+$("sort").onchange = fetchSegments;
+$("filter").onchange = fetchSegments;
+
+$("btnStartReview").onclick = startDueReview;
+$("btnStopReview").onclick = stopReview;
+
+$("btnReveal").onclick = () => {
+  const i = Number($("reviewBox").dataset.ri || "0");
+  const seg = reviewQueue[i];
+  if (!seg) return;
+  revealReviewText(seg.text);
+};
+
+document.querySelectorAll(".grade").forEach(btn => {
+  btn.addEventListener("click", () => gradeCurrent(btn.dataset.grade));
+});
+
+$("speed").onchange = () => {
+  if (!player) return;
+  try { player.setPlaybackRate(parseFloat($("speed").value)); } catch {}
+};
+
+// YouTube IFrame API callback
+window.onYouTubeIframeAPIReady = function () {
+  player = new YT.Player("player", {
+    height: "360",
+    width: "640",
+    videoId: "dQw4w9WgXcQ", // placeholder
+    playerVars: {
+      origin: window.location.origin
+    },
+    events: {
+      onReady: async () => {
+        setStatus("ready");
+        await fetchSegments();
+      }
+    }
+  });
+};
+
+// ===== Pagination (10 per page) =====
+(() => {
+  const PAGE_SIZE = 10;
+  let page = 1;
+
+  function ensurePager(listEl) {
+    let pager = document.getElementById("pager");
+    if (!pager) {
+      pager = document.createElement("div");
+      pager.id = "pager";
+      pager.style.display = "flex";
+      pager.style.gap = "10px";
+      pager.style.alignItems = "center";
+      pager.style.marginTop = "12px";
+
+      const btnPrev = document.createElement("button");
+      btnPrev.textContent = "◀";
+      btnPrev.className = "btn";
+      btnPrev.onclick = () => { page = Math.max(1, page - 1); apply(); };
+
+      const info = document.createElement("span");
+      info.id = "pagerInfo";
+
+      const btnNext = document.createElement("button");
+      btnNext.textContent = "▶";
+      btnNext.className = "btn";
+      btnNext.onclick = () => { page = page + 1; apply(); };
+
+      pager.appendChild(btnPrev);
+      pager.appendChild(info);
+      pager.appendChild(btnNext);
+
+      // list 아래에 붙이기
+      listEl.after(pager);
+    }
+    return pager;
+  }
+
+  function apply() {
+    const listEl = document.getElementById("list");
+    if (!listEl) return;
+
+    const items = Array.from(listEl.children);
+    const total = items.length;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+    if (page > totalPages) page = totalPages;
+
+    const start = (page - 1) * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+
+    items.forEach((el, i) => {
+      el.style.display = (i >= start && i < end) ? "" : "none";
+    });
+
+    ensurePager(listEl);
+    const info = document.getElementById("pagerInfo");
+    if (info) info.textContent = `Page ${page} / ${totalPages}  (←/→)`;
+  }
+
+  // 리스트가 바뀔 때마다(Refresh, Save 등) 자동으로 다시 적용
+  function watch() {
+    const listEl = document.getElementById("list");
+    if (!listEl) return;
+
+    ensurePager(listEl);
+
+    const mo = new MutationObserver(() => apply());
+    mo.observe(listEl, { childList: true });
+
+    
+    apply();
+  }
+
+  // DOM 준비되면 시작
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", watch);
+  } else {
+    watch();
+  }
+})();
+
+
+// ===============================
+// 📱 모바일용 이전 / 다음 버튼 추가
+// ===============================
+
+function addMobileNavButtons() {
+
+  // Player 영역 찾기
+  const playerSection = document.querySelector(".playerWrap");
+  if (!playerSection) return;
+
+  // 이미 버튼이 있으면 중복 생성 방지
+  if (document.getElementById("mobileNav")) return;
+
+  // 버튼 감싸는 div 생성
+  const nav = document.createElement("div");
+  nav.id = "mobileNav";
+  nav.style.display = "flex";
+  nav.style.justifyContent = "center";
+  nav.style.gap = "20px";
+  nav.style.marginTop = "15px";
+
+  // 이전 버튼
+  const prevBtn = document.createElement("button");
+  prevBtn.textContent = "◀ Prev";
+  prevBtn.className = "btn";
+  prevBtn.onclick = () => {
+    // 기존 키보드 왼쪽 화살표 기능 호출
+    document.dispatchEvent(new KeyboardEvent("keydown", { code: "ArrowLeft" }));
+  };
+
+  // 다음 버튼
+  const nextBtn = document.createElement("button");
+  nextBtn.textContent = "Next ▶";
+  nextBtn.className = "btn primary";
+  nextBtn.onclick = () => {
+    // 기존 키보드 오른쪽 화살표 기능 호출
+    document.dispatchEvent(new KeyboardEvent("keydown", { code: "ArrowRight" }));
+  };
+
+  nav.appendChild(prevBtn);
+  nav.appendChild(nextBtn);
+
+  // Player 아래에 붙이기
+  playerSection.after(nav);
+}
+
+// 페이지 로드되면 버튼 추가
+document.addEventListener("DOMContentLoaded", addMobileNavButtons);

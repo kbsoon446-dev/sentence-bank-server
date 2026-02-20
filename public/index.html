@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sentence Bank (Local)</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="header">
+    <div>
+      <h1>Sentence Bank</h1>
+      <div class="sub">Save hard-to-hear YouTube sentences, then review with spaced repetition.</div>
+    </div>
+    <div class="badge" id="status">loading…</div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h2>Add a segment</h2>
+
+      <div class="grid">
+        <label class="field">
+          <div class="label">YouTube URL (or video ID)</div>
+          <input id="youtube" placeholder="https://www.youtube.com/watch?v=AN0QJ4m48Fw" />
+        </label>
+
+        <label class="field">
+          <div class="label">Start</div>
+          <input id="start" placeholder="7:32" />
+        </label>
+
+        <label class="field">
+          <div class="label">End</div>
+          <input id="end" placeholder="7:38" />
+        </label>
+      </div>
+
+      <div class="row">
+        <button id="btnFetch" class="btn">Fetch English subtitle</button>
+        <button id="btnSave" class="btn primary">Save</button>
+      </div>
+
+      <label class="field">
+        <div class="label">Title (English subtitle text)</div>
+        <textarea id="text" rows="2" placeholder="(auto-filled if available)"></textarea>
+      </label>
+
+      <label class="field">
+        <div class="label">Note (optional)</div>
+        <input id="note" placeholder="What was hard to hear? (linking, reductions, etc.)" />
+      </label>
+
+      <div class="hint">
+        Tip: You can type time as <b>mm:ss</b> (e.g. 7:32) or seconds (e.g. 452).
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="row between">
+        <h2>List</h2>
+        <div class="row">
+          <select id="sort" class="select">
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+            <option value="random">Random</option>
+            <option value="due">Due (Review)</option>
+          </select>
+          <select id="filter" class="select">
+            <option value="all">All</option>
+            <option value="due">Due only</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row">
+        <input id="q" class="search" placeholder="Search text / note / videoId" />
+        <button id="btnRefresh" class="btn">Refresh</button>
+      </div>
+
+      <div class="stats" id="stats"></div>
+
+      <div id="list" class="list"></div>
+    </section>
+
+    <section class="card">
+      <h2>Player</h2>
+      <div class="playerWrap">
+        <div id="player"></div>
+      </div>
+
+      <div class="row between">
+        <div class="row">
+          <label class="row">
+            <span class="labelInline">Speed</span>
+            <select id="speed" class="select">
+              <option value="0.75">0.75</option>
+              <option value="1" selected>1.0</option>
+              <option value="1.25">1.25</option>
+            </select>
+          </label>
+
+          <label class="row">
+            <input id="loop" type="checkbox" checked />
+            <span class="labelInline">Loop</span>
+          </label>
+        </div>
+
+        <div class="row">
+          <button id="btnPlay" class="btn primary">Play</button>
+          <button id="btnPause" class="btn">Pause</button>
+        </div>
+      </div>
+
+      <div class="now" id="now"></div>
+      <div class="hint">
+        Keyboard (PC): <b>←</b> prev / <b>→</b> next / <b>↓</b> repeat / <b>Space</b> play-pause / <b>1-4</b> review grade (in review mode)
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Review (Spaced repetition)</h2>
+      <div class="row between">
+        <div id="reviewInfo" class="sub"></div>
+        <div class="row">
+          <button id="btnStartReview" class="btn primary">Start due review</button>
+          <button id="btnStopReview" class="btn">Stop</button>
+        </div>
+      </div>
+
+      <div id="reviewBox" class="reviewBox hidden">
+        <div class="reviewTop">
+          <div class="sub" id="reviewMeta"></div>
+          <button id="btnReveal" class="btn">Reveal subtitle</button>
+        </div>
+
+        <div class="reviewText" id="reviewText">(hidden)</div>
+
+        <div class="row grades">
+          <button class="btn grade" data-grade="again">1 Again</button>
+          <button class="btn grade" data-grade="hard">2 Hard</button>
+          <button class="btn grade primary" data-grade="good">3 Good</button>
+          <button class="btn grade" data-grade="easy">4 Easy</button>
+        </div>
+
+        <div class="hint">
+          Again = almost not heard (10 min later). Hard = 1 day. Good/Easy = longer.
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      Data is stored locally in <code>data.json</code> next to <code>server.js</code>.
+      (Backup = copy that file.)
+    </footer>
+  </main>
+
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
