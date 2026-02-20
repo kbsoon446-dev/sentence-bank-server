@@ -132,7 +132,7 @@ async function fetchSegments() {
   const filter = $("filter").value;
   const q = $("q").value.trim();
 
-  const url = new URL("https://sentence-bank.onrender.com/api/segments", window.location.origin);
+  const url = new URL("https://sentence-bank-server.onrender.com/api/segments", window.location.origin);
   url.searchParams.set("sort", sort);
   url.searchParams.set("filter", filter);
   if (q) url.searchParams.set("q", q);
@@ -185,7 +185,7 @@ function renderList() {
     el.querySelector('[data-act="review"]').onclick = () => startSingleReview(seg.id);
     el.querySelector('[data-act="del"]').onclick = async () => {
       if (!confirm("Delete this segment?")) return;
-      await fetch(`https://sentence-bank.onrender.com/api/segments${encodeURIComponent(seg.id)}`, { method: "DELETE" });
+      await fetch(`https://sentence-bank-server.onrender.com/api/segments/${encodeURIComponent(seg.id)}`, { method: "DELETE" });
       await fetchSegments();
     }
     // =======================
@@ -202,7 +202,7 @@ function renderList() {
       if (newNote === null) return;
 
       // 3️⃣ 서버에 수정 요청 보내기
-      const res = await fetch(`https://sentence-bank.onrender.com/api/segments${encodeURIComponent(seg.id)}`, {
+      const res = await fetch(`https://sentence-bank-server.onrender.com/api/segments/${encodeURIComponent(seg.id)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -274,7 +274,7 @@ async function saveSegment() {
   }
 
   setStatus("saving…");
-  const res = await fetch("https://sentence-bank.onrender.com/api/segments", {
+  const res = await fetch("https://sentence-bank-server.onrender.com/api/segments", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ youtube, videoId, start, end, text, note })
@@ -320,7 +320,7 @@ async function startDueReview() {
   showReviewBox(true);
 
   // get a fresh due list in due order
-  const url = new URL("https://sentence-bank.onrender.com/api/segments", window.location.origin);
+  const url = new URL("https://sentence-bank-server.onrender.com/api/segments");
   url.searchParams.set("sort", "due");
   url.searchParams.set("filter", "due");
   const res = await fetch(url.toString());
@@ -377,7 +377,7 @@ async function gradeCurrent(grade) {
   if (!id) return;
 
   // send grade
-  await fetch(`/api/review/${encodeURIComponent(id)}`, {
+  await fetch(`https://sentence-bank-server.onrender.com/api/review/${encodeURIComponent(id)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ grade })
