@@ -399,11 +399,18 @@ async function gradeCurrent(grade) {
   if (!id) return;
 
   // send grade
-  await fetch(`https://sentence-bank-server.onrender.com/api/review/${encodeURIComponent(id)}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ grade })
-  });
+  // ✅ 리뷰 요청 보내고, 실패하면 이유를 보여주기
+const res = await fetch(`${API_BASE}/api/review/${encodeURIComponent(id)}`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ grade })
+});
+
+if (!res.ok) {
+  const msg = await res.text();
+  alert("Review update failed: " + msg);
+  return; // 실패면 fetchSegments 하지 말고 멈춤
+}
 
   // refresh list and move next
   await fetchSegments();
