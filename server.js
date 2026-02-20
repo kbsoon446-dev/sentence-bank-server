@@ -1,3 +1,4 @@
+import cors from "cors";
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -17,6 +18,8 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 8000;
 const DATA_FILE = path.join(__dirname, "data.json");
 
 const app = express();
+// ✅ Netlify 같은 다른 도메인에서 API 호출 허용
+app.use(cors());
 // ===============================
 // ✅ Supabase 연결 설정
 // ===============================
