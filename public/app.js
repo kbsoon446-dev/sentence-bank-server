@@ -1,3 +1,4 @@
+const API_BASE = "https://sentence-bank-server.onrender.com";
 let player = null;
 let loopTimer = null;
 
@@ -247,7 +248,7 @@ async function fetchCaptionIntoText() {
   }
 
   setStatus("fetching captions…");
-  const url = new URL("/api/caption", window.location.origin);
+  const url = new URL(`${API_BASE}/api/caption`);
   url.searchParams.set("videoId", videoId);
   url.searchParams.set("start", String(start));
   url.searchParams.set("end", String(end));
