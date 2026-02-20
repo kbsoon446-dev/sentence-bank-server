@@ -356,19 +356,69 @@ app.delete("/api/segments/:id", async (req, res) => {
   }
 });
 
+// ===============================
+// ✅ 리뷰(grade) → Supabase 반영
+// POST /api/review/:id
+// body: { grade }
+// ===============================
 app.post("/api/review/:id", async (req, res) => {
-  const db = await loadDb();
-  const id = req.params.id;
-  const grade = String(req.body.grade || "good");
+  try {
+    const id = req.params.id;
+    const grade = String(req.body.grade || "good");
 
-  const seg = db.segments.find((s) => s.id === id);
-  if (!seg) return res.status(404).json({ error: "not found" });
+    // 1️⃣ 현재 세그먼트 조회
+    const { data: seg, error: fetchError } = await supabase
+      .from("segments")
+      .select("*")
+      .eq("id", id)
+      .single();
 
-  srsUpdate(seg, grade);
-  seg.updatedAt = nowIso();
+    if (fetchError || !seg) {
+      return res.status(404).json({ error: "not found" });
+    }
 
-  await saveDb(db);
-  res.json({ segment: seg });
+    // 2️⃣ SRS 계산 (기존 함수 재사용)
+    const updated = {
+      level: seg.level,
+      due_at: seg.due_at,
+      reviewCount: seg.reviewCount ?? 0,
+      lapseCount: seg.lapseCount ?? 0,
+      lastReviewedAt: null,
+      lastGrade: null
+    };
+
+    // 기존 srsUpdate 함수 활용
+    const temp = {
+      level: seg.level,
+      dueAt: seg.due_at,
+      reviewCount: seg.reviewCount,
+      lapseCount: seg.lapseCount
+    };
+
+    srsUpdate(temp, grade);
+
+    updated.level = temp.level;
+    updated.due_at = temp.dueAt;
+    updated.reviewCount = temp.reviewCount;
+    updated.lapseCount = temp.lapseCount;
+    updated.lastReviewedAt = new Date().toISOString();
+    updated.lastGrade = grade;
+
+    // 3️⃣ Supabase 업데이트
+    const { error: updateError } = await supabase
+      .from("segments")
+      .update(updated)
+      .eq("id", id);
+
+    if (updateError) {
+      return res.status(500).json({ error: updateError.message });
+    }
+
+    return res.json({ ok: true });
+
+  } catch (e) {
+    return res.status(500).json({ error: String(e) });
+  }
 });
 
 // fallback -> index.html (for direct open)
