@@ -149,24 +149,21 @@ async function fetchSegments() {
   refreshReviewInfo();
 }
 
+// ===============================
+// 📊 상단 Total / Due 표시 계산
+// ===============================
 function renderStats() {
   const total = segments.length;
-  // ===============================
-// ✅ dueAt이 있는 경우만 진짜 due로 계산
-// ===============================
-const now = Date.now();
-
-function refreshReviewInfo() {
   const now = Date.now();
 
+  // 🔥 dueAt이 현재보다 이전인 것만 due
   const dueNow = segments.filter(s => {
     if (!s.dueAt) return false;
     const t = new Date(s.dueAt).getTime();
     return !isNaN(t) && t <= now;
   });
 
-  $("reviewInfo").textContent = `Due now: ${dueNow.length}`;
-}
+  $("stats").textContent = `Total: ${total} · Due now: ${dueNow.length}`;
 }
 
 function renderList() {
@@ -311,17 +308,18 @@ async function saveSegment() {
   setStatus("ready");
 }
 
-function refreshReviewInfo() {
-  // ===============================
-// ✅ dueAt이 있는 경우만 진짜 due로 계산
 // ===============================
-const now = Date.now();
+// 📋 리뷰 화면 상단 Due 표시
+// ===============================
+function refreshReviewInfo() {
+  const now = Date.now();
 
-const due = segments.filter(s => {
-  if (!s.dueAt) return false;   // 🔥 createdAt fallback 제거
-  const t = new Date(s.dueAt).getTime();
-  return !isNaN(t) && t <= now;
-}).length;
+  const dueNow = segments.filter(s => {
+    if (!s.dueAt) return false;
+    const t = new Date(s.dueAt).getTime();
+    return !isNaN(t) && t <= now;
+  });
+
   $("reviewInfo").textContent = `Due now: ${dueNow.length}`;
 }
 
