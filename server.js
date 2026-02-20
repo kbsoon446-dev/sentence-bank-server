@@ -231,20 +231,37 @@ app.get("/api/caption", async (req, res) => {
 });
 
 // ===============================
-// ✅ (1) 세그먼트 목록 가져오기
+// ✅ (1) 세그먼트 목록 가져오기 (filter 지원)
 // GET /api/segments
 // ===============================
 app.get("/api/segments", async (req, res) => {
   try {
-    // 정렬/검색/필터가 더 있으면 나중에 확장 가능
-    const { data, error } = await supabase
+    const { filter, sort } = req.query;
+
+    let query = supabase
       .from("segments")
-      .select("*")
-      .order("created_at", { ascending: false });
+      .select("*");
+
+    // 🔥 filter=due 처리 (현재 시각 이전만)
+    if (filter === "due") {
+      const nowIso = new Date().toISOString();
+      query = query.lte("due_at", nowIso);
+    }
+
+    // 정렬 처리
+    if (sort === "due") {
+      query = query.order("due_at", { ascending: true });
+    } else if (sort === "oldest") {
+      query = query.order("created_at", { ascending: true });
+    } else {
+      // 기본 newest
+      query = query.order("created_at", { ascending: false });
+    }
+
+    const { data, error } = await query;
 
     if (error) return res.status(500).json({ error: error.message });
 
-    // ✅ 프론트(app.js)가 기대하는 필드명으로 맞춰주기
     const segments = (data || []).map(row => ({
       id: row.id,
       videoId: row.video_id,
@@ -257,6 +274,7 @@ app.get("/api/segments", async (req, res) => {
     }));
 
     return res.json({ segments });
+
   } catch (e) {
     return res.status(500).json({ error: String(e) });
   }
