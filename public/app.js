@@ -156,12 +156,17 @@ function renderStats() {
 // ===============================
 const now = Date.now();
 
-const due = segments.filter(s => {
-  if (!s.dueAt) return false;   // 🔥 createdAt fallback 제거
-  const t = new Date(s.dueAt).getTime();
-  return !isNaN(t) && t <= now;
-}).length;
-  $("stats").textContent = `Total: ${total}   ·   Due now: ${due}`;
+function refreshReviewInfo() {
+  const now = Date.now();
+
+  const dueNow = segments.filter(s => {
+    if (!s.dueAt) return false;
+    const t = new Date(s.dueAt).getTime();
+    return !isNaN(t) && t <= now;
+  });
+
+  $("reviewInfo").textContent = `Due now: ${dueNow.length}`;
+}
 }
 
 function renderList() {
