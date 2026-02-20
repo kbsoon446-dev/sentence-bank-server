@@ -151,7 +151,16 @@ async function fetchSegments() {
 
 function renderStats() {
   const total = segments.length;
-  const due = segments.filter(s => new Date(s.dueAt || s.createdAt).getTime() <= Date.now()).length;
+  // ===============================
+// ✅ dueAt이 있는 경우만 진짜 due로 계산
+// ===============================
+const now = Date.now();
+
+const due = segments.filter(s => {
+  if (!s.dueAt) return false;   // 🔥 createdAt fallback 제거
+  const t = new Date(s.dueAt).getTime();
+  return !isNaN(t) && t <= now;
+}).length;
   $("stats").textContent = `Total: ${total}   ·   Due now: ${due}`;
 }
 
@@ -298,7 +307,16 @@ async function saveSegment() {
 }
 
 function refreshReviewInfo() {
-  const dueNow = segments.filter(s => new Date(s.dueAt || s.createdAt).getTime() <= Date.now());
+  // ===============================
+// ✅ dueAt이 있는 경우만 진짜 due로 계산
+// ===============================
+const now = Date.now();
+
+const due = segments.filter(s => {
+  if (!s.dueAt) return false;   // 🔥 createdAt fallback 제거
+  const t = new Date(s.dueAt).getTime();
+  return !isNaN(t) && t <= now;
+}).length;
   $("reviewInfo").textContent = `Due now: ${dueNow.length}`;
 }
 
