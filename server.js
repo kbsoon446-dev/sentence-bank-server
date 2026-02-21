@@ -209,7 +209,7 @@ function srsUpdate(seg, grade) {
 
 // --- APIs ---
 app.get("/api/health", (req, res) => {
-  res.json({ ok: true, time: nowIso() });
+  res.json({ ok: true, time: nowIso(), build: "review-minimal-v1" }); // ✅ 배포 확인용
 });
 
 app.get("/api/caption", async (req, res) => {
@@ -384,10 +384,9 @@ app.post("/api/review/:id", async (req, res) => {
     const id = req.params.id;
     const grade = String(req.body.grade || "good");
 
-    // 1️⃣ 현재 세그먼트 조회
     const { data: seg, error: fetchError } = await supabase
       .from("segments")
-      .select("*")
+      .select("id, level, due_at")
       .eq("id", id)
       .single();
 
@@ -395,37 +394,20 @@ app.post("/api/review/:id", async (req, res) => {
       return res.status(404).json({ error: "not found" });
     }
 
-    // 2️⃣ SRS 계산 (기존 함수 재사용)
-    const updated = {
-      level: seg.level,
-      due_at: seg.due_at,
-      reviewCount: seg.reviewCount ?? 0,
-      lapseCount: seg.lapseCount ?? 0,
-      lastReviewedAt: null,
-      lastGrade: null
-    };
-
-    // 기존 srsUpdate 함수 활용
     const temp = {
-      level: seg.level,
-      dueAt: seg.due_at,
-      reviewCount: seg.reviewCount,
-      lapseCount: seg.lapseCount
+      level: seg.level ?? 0,
+      dueAt: seg.due_at
     };
 
     srsUpdate(temp, grade);
 
-    updated.level = temp.level;
-    updated.due_at = temp.dueAt;
-    updated.reviewCount = temp.reviewCount;
-    updated.lapseCount = temp.lapseCount;
-    updated.lastReviewedAt = new Date().toISOString();
-    updated.lastGrade = grade;
-
-    // 3️⃣ Supabase 업데이트
     const { error: updateError } = await supabase
       .from("segments")
-      .update(updated)
+      .update({
+        level: temp.level,
+        due_at: temp.dueAt,
+        updated_at: new Date().toISOString()
+      })
       .eq("id", id);
 
     if (updateError) {
