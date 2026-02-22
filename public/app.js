@@ -448,12 +448,13 @@ document.addEventListener("keydown", (e) => {
   if (e.code === "ArrowDown") {
     if (currentIndex >= 0) playSegmentByIndex(currentIndex);
   }
-  if (e.code === "Space") {
-    if (!player) return;
-    const state = player.getPlayerState();
-    if (state === YT.PlayerState.PLAYING) pause();
-    else if (currentIndex >= 0) playSegmentByIndex(currentIndex);
-  }
+// ✅ Space로 재생/일시정지 토글을 하지 않도록 비활성화
+// if (e.code === "Space") {
+//   if (!player) return;
+//   const state = player.getPlayerState();
+//   if (state === YT.PlayerState.PLAYING) pause();
+//   else if (currentIndex >= 0) playSegmentByIndex(currentIndex);
+// }
 
   if (!reviewActive) return;
 
