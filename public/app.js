@@ -440,9 +440,20 @@ function stopReview() {
 
 // keyboard shortcuts
 document.addEventListener("keydown", (e) => {
+  // ✅ 입력창(제목/메모/검색/시간 입력 등)에서는 스페이스/방향키를 막지 않기
+const tag = document.activeElement?.tagName?.toLowerCase();
+const isTyping =
+  tag === "input" || tag === "textarea" || tag === "select" || document.activeElement?.isContentEditable;
+
+if (!isTyping) {
+  // ✅ 입력 중이 아닐 때만: 스페이스/방향키로 페이지 스크롤 방지 + 단축키 동작
   if (["Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.code)) {
     e.preventDefault();
   }
+} else {
+  // ✅ 입력 중이면 단축키 기능도 막아서(충돌 방지) 그냥 타이핑만 되게 함
+  return;
+}
 
   if (e.code === "ArrowRight") {
     if (!segments.length) return;
