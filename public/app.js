@@ -142,6 +142,15 @@ async function fetchSegments() {
   const data = await res.json();
   segments = data.segments || [];
 
+  // ✅ Random 정렬일 때는 프론트에서 셔플(서버가 random을 지원하지 않아도 됨)
+if (sort === "random") {
+  // Fisher–Yates shuffle
+  for (let i = segments.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [segments[i], segments[j]] = [segments[j], segments[i]];
+  }
+}
+
   renderStats();
   renderList();
 
