@@ -274,10 +274,24 @@ async function fetchCaptionIntoText() {
   url.searchParams.set("end", String(end));
 
   const res = await fetch(url.toString());
-  const data = await res.json();
+const data = await res.json().catch(() => ({}));
 
-  $("text").value = data.text || "";
+// ✅ 서버가 에러 주면 경고 띄우기
+if (!res.ok || data.error) {
+  alert("자막 가져오기 실패: " + (data.error || res.statusText || "unknown error"));
   setStatus("ready");
+  return;
+}
+
+// ✅ 정상일 때만 채우기
+$("text").value = data.text || "";
+
+// ✅ 자막이 빈 경우도 알려주기(자막 없는 영상일 수 있음)
+if (!$("text").value.trim()) {
+  alert("영어 자막/자동자막을 찾지 못했어요. (영상에 자막이 없거나, 가져오기가 막혔을 수 있어요)");
+}
+
+setStatus("ready");
 }
 
 async function saveSegment() {
@@ -440,19 +454,36 @@ function stopReview() {
 
 // keyboard shortcuts
 document.addEventListener("keydown", (e) => {
-  // ✅ 입력창(제목/메모/검색/시간 입력 등)에서는 스페이스/방향키를 막지 않기
-const tag = document.activeElement?.tagName?.toLowerCase();
-const isTyping =
-  tag === "input" || tag === "textarea" || tag === "select" || document.activeElement?.isContentEditable;
+// ===============================
+// ✅ 입력칸에서는 단축키(스페이스/화살표 등) 완전 비활성화
+//    - document.activeElement가 BODY로 잡히는 경우가 있어서
+//      e.target + 특정 입력칸 id까지 같이 체크한다.
+// ===============================
+const active = document.activeElement;
+const activeTag = active?.tagName?.toLowerCase();
 
-if (!isTyping) {
-  // ✅ 입력 중이 아닐 때만: 스페이스/방향키로 페이지 스크롤 방지 + 단축키 동작
-  if (["Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.code)) {
-    e.preventDefault();
-  }
-} else {
-  // ✅ 입력 중이면 단축키 기능도 막아서(충돌 방지) 그냥 타이핑만 되게 함
+// 우리 앱의 입력칸들(id 기준)
+const inputIds = new Set(["youtube", "start", "end", "q", "note", "text"]);
+
+// 현재 포커스가 input/textarea/select 이거나,
+// 포커스된 요소의 id가 위 입력칸 중 하나면 => 타이핑 중으로 간주
+const isTyping =
+  activeTag === "input" ||
+  activeTag === "textarea" ||
+  activeTag === "select" ||
+  active?.isContentEditable ||
+  (active?.id && inputIds.has(active.id)) ||
+  (e.target?.id && inputIds.has(e.target.id));
+
+if (isTyping) {
+  // ✅ 입력 중에는 스페이스/화살표 단축키를 아예 실행하지 않음
+  //    (스페이스 타이핑이 정상 동작)
   return;
+}
+
+// ✅ 입력 중이 아닐 때만 스크롤 방지 + 단축키 사용
+if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code)) {
+  e.preventDefault();
 }
 
   if (e.code === "ArrowRight") {
@@ -665,3 +696,6 @@ function addMobileNavButtons() {
 
 // 페이지 로드되면 버튼 추가
 document.addEventListener("DOMContentLoaded", addMobileNavButtons);
+
+// ✅ Title 칸 클릭하면 포커스 확실히 주기(유튜브 iframe이 포커스 뺏는 것 완화)
+$("text").addEventListener("mousedown", () => $("text").focus());
