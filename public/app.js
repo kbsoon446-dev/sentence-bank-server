@@ -272,7 +272,6 @@ el.querySelector('[data-act="edit"]').onclick = async () => {
   // 수정 후 목록 다시 불러오기
   await fetchSegments();
 };
-    ;
 
     list.appendChild(el);
   });
