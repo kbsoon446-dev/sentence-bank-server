@@ -210,36 +210,68 @@ function renderList() {
       await fetchSegments();
     }
     // =======================
-    // Edit 버튼 클릭 처리
-    // =======================
-    el.querySelector('[data-act="edit"]').onclick = async () => {
+// Edit 버튼 클릭 처리
+// 자막 / 메모 / 시작시간 / 끝시간 / 영상ID 수정
+// =======================
+el.querySelector('[data-act="edit"]').onclick = async () => {
 
-      // 1️⃣ 현재 자막 수정
-      const newText = prompt("Edit subtitle:", seg.text || "");
-      if (newText === null) return; // 취소 누르면 종료
+  // 1️⃣ 자막 수정
+  const newText = prompt("Edit subtitle:", seg.text || "");
+  if (newText === null) return;
 
-      // 2️⃣ 메모 수정
-      const newNote = prompt("Edit note:", seg.note || "");
-      if (newNote === null) return;
+  // 2️⃣ 메모 수정
+  const newNote = prompt("Edit note:", seg.note || "");
+  if (newNote === null) return;
 
-      // 3️⃣ 서버에 수정 요청 보내기
-      const res = await fetch(`https://sentence-bank-server.onrender.com/api/segments/${encodeURIComponent(seg.id)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: newText,
-          note: newNote
-        })
-      });
+  // 3️⃣ 시작 시간 수정
+  const newStartInput = prompt("Edit start time (mm:ss or seconds):", fmt(seg.start));
+  if (newStartInput === null) return;
 
-      if (!res.ok) {
-        alert("Update failed");
-        return;
-      }
+  // 4️⃣ 끝 시간 수정
+  const newEndInput = prompt("Edit end time (mm:ss or seconds):", fmt(seg.end));
+  if (newEndInput === null) return;
 
-      // 4️⃣ 수정 후 리스트 다시 불러오기
-      await fetchSegments();
-    };
+  // 5️⃣ 영상 URL 또는 videoId 수정
+  const newYoutubeInput = prompt("Edit YouTube URL or video ID:", seg.videoId || "");
+  if (newYoutubeInput === null) return;
+
+  // =======================
+  // 입력값 파싱
+  // =======================
+  const newStart = parseTimeToSeconds(newStartInput);
+  const newEnd = parseTimeToSeconds(newEndInput);
+  const newVideoId = parseVideoId(newYoutubeInput);
+
+  // 시간/영상ID 검사
+  if (!newVideoId || !Number.isFinite(newStart) || !Number.isFinite(newEnd) || newEnd <= newStart) {
+    alert("시간 또는 영상 주소가 올바르지 않습니다.");
+    return;
+  }
+
+  // =======================
+  // 서버에 수정 요청
+  // =======================
+  const res = await fetch(`${API_BASE}/api/segments/${encodeURIComponent(seg.id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      text: newText,
+      note: newNote,
+      videoId: newVideoId,
+      start: newStart,
+      end: newEnd
+    })
+  });
+
+  if (!res.ok) {
+    const msg = await res.text();
+    alert("Update failed: " + msg);
+    return;
+  }
+
+  // 수정 후 목록 다시 불러오기
+  await fetchSegments();
+};
     ;
 
     list.appendChild(el);
