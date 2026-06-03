@@ -350,6 +350,43 @@ if (!$("text").value.trim()) {
 setStatus("ready");
 }
 
+async function fetchTranscriptIntoText() {
+  const youtube = $("youtube").value.trim();
+  const videoId = parseVideoId(youtube);
+
+  if (!videoId) {
+    alert("Please check URL/videoId.");
+    return;
+  }
+
+  setStatus("fetching full script…");
+  const url = new URL(`${API_BASE}/api/transcript`);
+  url.searchParams.set("videoId", videoId);
+
+  const res = await fetch(url.toString());
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok || data.error) {
+    const error = data.error || res.statusText || "unknown error";
+    const isMetadataBlocked = error.includes("caption metadata") || error.includes("not playable");
+    alert(
+      isMetadataBlocked
+        ? "이 영상은 서버에서 YouTube 자막 정보를 가져올 수 없어요.\n\n가능한 이유:\n- 영상이 비공개/삭제/지역제한/로그인 필요 상태\n- YouTube가 서버 요청에는 자막 정보를 숨김\n- 해당 언어의 자막/자동자막이 없음\n\n브라우저에서 영상이 재생돼도 서버에서는 자막 접근이 막힐 수 있어요."
+        : "스크립트 가져오기 실패: " + error
+    );
+    setStatus("ready");
+    return;
+  }
+
+  $("text").value = data.text || "";
+
+  if (!$("text").value.trim()) {
+    alert("영어 자막/자동자막을 찾지 못했어요. 영상에 자막이 없거나, YouTube가 서버 요청을 막았을 수 있어요.");
+  }
+
+  setStatus("ready");
+}
+
 async function saveSegment() {
   const youtube = $("youtube").value.trim();
   const videoId = parseVideoId(youtube);
@@ -573,6 +610,7 @@ if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code
 
 // UI handlers
 $("btnFetch").onclick = fetchCaptionIntoText;
+$("btnTranscript").onclick = fetchTranscriptIntoText;
 $("btnSave").onclick = saveSegment;
 $("btnRefresh").onclick = fetchSegments;
 
