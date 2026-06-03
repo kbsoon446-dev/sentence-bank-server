@@ -103,12 +103,25 @@ function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
 }
 
-// --- Captions (English preferred, fallback ASR) ---
-async function fetchCaptionEvents(videoId) {
-  const tries = [
-    `https://video.google.com/timedtext?lang=en&v=${encodeURIComponent(videoId)}`,
-    `https://video.google.com/timedtext?lang=en&kind=asr&v=${encodeURIComponent(videoId)}`,
-  ];
+// --- Captions (English manual preferred; non-English ASR only) ---
+function normalizeCaptionLanguage(lang) {
+  const requested = String(lang || "en").trim().toLowerCase();
+  return requested || "en";
+}
+
+async function fetchCaptionEvents(videoId, lang = "en") {
+  const captionLang = normalizeCaptionLanguage(lang);
+  const video = encodeURIComponent(videoId);
+  const encodedLang = encodeURIComponent(captionLang);
+  const isEnglish = captionLang === "en" || captionLang.startsWith("en-");
+  const tries = isEnglish
+    ? [
+        `https://video.google.com/timedtext?lang=${encodedLang}&v=${video}`,
+        `https://video.google.com/timedtext?lang=${encodedLang}&kind=asr&v=${video}`,
+      ]
+    : [
+        `https://video.google.com/timedtext?lang=${encodedLang}&kind=asr&v=${video}`,
+      ];
 
   for (const url of tries) {
     const res = await fetch(url);
@@ -215,6 +228,7 @@ app.get("/api/health", (req, res) => {
 app.get("/api/caption", async (req, res) => {
   try {
     const videoId = parseVideoId(req.query.videoId);
+    const lang = normalizeCaptionLanguage(req.query.lang);
     const start = Number(req.query.start);
     const end = Number(req.query.end);
 
@@ -222,9 +236,9 @@ app.get("/api/caption", async (req, res) => {
       return res.status(400).json({ error: "videoId/start/end invalid" });
     }
 
-    const events = await fetchCaptionEvents(videoId);
+    const events = await fetchCaptionEvents(videoId, lang);
     const text = events.length ? segmentTextFromEvents(events, start, end) : "";
-    return res.json({ text });
+    return res.json({ text, lang });
   } catch (e) {
     return res.status(500).json({ error: String(e) });
   }
