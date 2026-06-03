@@ -342,7 +342,9 @@ async function downloadYouTubeAudio(videoId) {
 }
 
 async function transcribeYouTubeAudio(videoId) {
-  if (!OPENAI_API_KEY) return [];
+  if (!OPENAI_API_KEY) {
+    throw new Error("AI transcription is not configured. Set OPENAI_API_KEY on Render.");
+  }
 
   const audio = await downloadYouTubeAudio(videoId);
   const form = new FormData();
@@ -446,8 +448,12 @@ async function fetchCaptionEvents(videoId, lang = "en") {
   try {
     return await fetchCaptionEventsFromWatchPage(videoId, captionLang);
   } catch (captionError) {
-    const aiEvents = await transcribeYouTubeAudio(videoId);
-    if (aiEvents.length) return aiEvents;
+    try {
+      const aiEvents = await transcribeYouTubeAudio(videoId);
+      if (aiEvents.length) return aiEvents;
+    } catch (aiError) {
+      throw new Error(`${captionError.message}; ${aiError.message}`);
+    }
     throw captionError;
   }
 }
