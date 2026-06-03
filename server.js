@@ -110,6 +110,38 @@ function extractJsonAfter(html, marker) {
   return null;
 }
 
+function extractYtcfg(html) {
+  const merged = {};
+  let offset = 0;
+
+  while (offset < html.length) {
+    const markerIndex = html.indexOf("ytcfg.set(", offset);
+    if (markerIndex === -1) break;
+    const value = extractJsonAfter(html.slice(markerIndex), "ytcfg.set(");
+    if (value && typeof value === "object") Object.assign(merged, value);
+    offset = markerIndex + 10;
+  }
+
+  const apiKey = html.match(/"INNERTUBE_API_KEY"\s*:\s*"([^"]+)"/)?.[1];
+  if (apiKey) merged.INNERTUBE_API_KEY = apiKey;
+
+  const clientVersion = html.match(/"INNERTUBE_CLIENT_VERSION"\s*:\s*"([^"]+)"/)?.[1];
+  if (clientVersion) merged.INNERTUBE_CLIENT_VERSION = clientVersion;
+
+  const contextIndex = html.indexOf('"INNERTUBE_CONTEXT"');
+  if (contextIndex !== -1) {
+    const contextStart = html.indexOf("{", contextIndex);
+    const context = contextStart !== -1 ? extractJsonAfter(html.slice(contextStart), "") : null;
+    if (context?.client) merged.INNERTUBE_CONTEXT = context;
+  }
+
+  return merged;
+}
+
+function playerResponseCaptionTracks(player) {
+  return player?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+}
+
 function pickCaptionTrack(tracks, lang) {
   const captionLang = normalizeCaptionLanguage(lang);
   const isEnglish = captionLang === "en" || captionLang.startsWith("en-");
@@ -156,6 +188,126 @@ function parseJson3Caption(data) {
     .filter((event) => event.text.length > 0);
 }
 
+async function captionEventsFromTrack(track) {
+  if (!track?.baseUrl) return [];
+
+  const url = new URL(track.baseUrl);
+  url.searchParams.set("fmt", "json3");
+
+  const captionRes = await fetch(url, {
+    headers: {
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+      "accept-language": "en-US,en;q=0.9,ko;q=0.8",
+    },
+  });
+  if (!captionRes.ok) return [];
+  const body = await captionRes.text();
+  if (!body.trim()) return [];
+
+  try {
+    return parseJson3Caption(JSON.parse(body));
+  } catch {
+    return [];
+  }
+}
+
+function innertubeClientContexts(ytcfg) {
+  const webClientVersion = ytcfg?.INNERTUBE_CLIENT_VERSION || "2.20260101.00.00";
+  const webContext = ytcfg?.INNERTUBE_CONTEXT;
+  const contexts = [];
+
+  if (webContext?.client) contexts.push(webContext);
+
+  contexts.push(
+    {
+      client: {
+        clientName: "WEB",
+        clientVersion: webClientVersion,
+        hl: "en",
+        gl: "US",
+      },
+    },
+    {
+      client: {
+        clientName: "WEB_EMBEDDED_PLAYER",
+        clientVersion: webClientVersion,
+        hl: "en",
+        gl: "US",
+        clientScreen: "EMBED",
+      },
+    },
+    {
+      client: {
+        clientName: "ANDROID",
+        clientVersion: "19.09.37",
+        androidSdkVersion: 30,
+        hl: "en",
+        gl: "US",
+      },
+    },
+    {
+      client: {
+        clientName: "IOS",
+        clientVersion: "19.09.3",
+        deviceMake: "Apple",
+        deviceModel: "iPhone16,2",
+        osName: "iPhone",
+        osVersion: "17.5.1.21F90",
+        hl: "en",
+        gl: "US",
+      },
+    }
+  );
+
+  const seen = new Set();
+  return contexts.filter((context) => {
+    const key = `${context.client?.clientName}:${context.client?.clientVersion}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+async function fetchCaptionEventsFromInnertube(videoId, lang, ytcfg = {}) {
+  const apiKey = ytcfg?.INNERTUBE_API_KEY;
+  if (!apiKey) return [];
+
+  for (const context of innertubeClientContexts(ytcfg)) {
+    try {
+      const res = await fetch(`https://www.youtube.com/youtubei/v1/player?key=${encodeURIComponent(apiKey)}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+          "accept-language": "en-US,en;q=0.9,ko;q=0.8",
+          origin: "https://www.youtube.com",
+          referer: `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`,
+        },
+        body: JSON.stringify({
+          context,
+          videoId,
+          playbackContext: {
+            contentPlaybackContext: {
+              html5Preference: "HTML5_PREF_WANTS",
+            },
+          },
+        }),
+      });
+
+      if (!res.ok) continue;
+      const player = await res.json();
+      const tracks = playerResponseCaptionTracks(player);
+      const track = pickCaptionTrack(tracks, lang);
+      const events = await captionEventsFromTrack(track);
+      if (events.length) return events;
+    } catch {
+      // Try the next client context.
+    }
+  }
+
+  return [];
+}
+
 async function fetchCaptionEventsFromWatchPage(videoId, lang) {
   const res = await fetch(`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`, {
     headers: {
@@ -164,25 +316,25 @@ async function fetchCaptionEventsFromWatchPage(videoId, lang) {
     },
   });
   const html = await res.text();
+  const ytcfg = extractYtcfg(html);
   const player = extractJsonAfter(html, "ytInitialPlayerResponse");
-  if (!player) {
-    throw new Error("YouTube caption metadata is not available for this video");
+
+  if (player) {
+    const status = player?.playabilityStatus;
+    if (status?.status === "ERROR") {
+      throw new Error(status.reason || "YouTube video is not playable");
+    }
+
+    const tracks = playerResponseCaptionTracks(player);
+    const track = pickCaptionTrack(tracks, lang);
+    const events = await captionEventsFromTrack(track);
+    if (events.length) return events;
   }
-  const status = player?.playabilityStatus;
-  if (status?.status === "ERROR") {
-    throw new Error(status.reason || "YouTube video is not playable");
-  }
 
-  const tracks = player?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
-  const track = pickCaptionTrack(tracks, lang);
-  if (!track?.baseUrl) return [];
+  const innertubeEvents = await fetchCaptionEventsFromInnertube(videoId, lang, ytcfg);
+  if (innertubeEvents.length) return innertubeEvents;
 
-  const url = new URL(track.baseUrl);
-  url.searchParams.set("fmt", "json3");
-
-  const captionRes = await fetch(url);
-  if (!captionRes.ok) return [];
-  return parseJson3Caption(await captionRes.json());
+  throw new Error("YouTube caption metadata is not available for this video");
 }
 
 async function fetchCaptionEvents(videoId, lang = "en") {
