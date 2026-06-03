@@ -4,12 +4,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs/promises";
 import { XMLParser } from "fast-xml-parser";
-// ✅ .env 파일 읽기 (키 노출 방지)
 import "dotenv/config";
-
-// ✅ Supabase 연결
 import { createClient } from "@supabase/supabase-js";
-
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,16 +14,13 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 8000;
 const DATA_FILE = path.join(__dirname, "data.json");
 
 const app = express();
-// ✅ Netlify 같은 다른 도메인에서 API 호출 허용
 app.use(cors());
-// ===============================
-// ✅ Supabase 연결 설정
-// ===============================
+
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  console.error("❌ .env에 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY가 없습니다.");
+  console.error("Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY in .env.");
   process.exit(1);
 }
 
@@ -55,44 +48,17 @@ function decodeEntities(s = "") {
     .trim();
 }
 
-function genId() {
-  // short random id, good enough for local use
-  return Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
-}
-
-async function loadDb() {
-  try {
-    const raw = await fs.readFile(DATA_FILE, "utf-8");
-    const db = JSON.parse(raw);
-    if (!db || typeof db !== "object") return { segments: [] };
-    if (!Array.isArray(db.segments)) db.segments = [];
-    return db;
-  } catch (e) {
-    return { segments: [] };
-  }
-}
-
-async function saveDb(db) {
-  await fs.writeFile(DATA_FILE, JSON.stringify(db, null, 2), "utf-8");
-}
-
 function parseVideoId(urlOrId) {
   const s = String(urlOrId || "").trim();
   if (!s) return "";
-
-  // if already looks like an id
   if (/^[a-zA-Z0-9_-]{11}$/.test(s)) return s;
 
-  // common patterns
-  // https://www.youtube.com/watch?v=VIDEOID
   const m1 = s.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
   if (m1) return m1[1];
 
-  // https://youtu.be/VIDEOID
   const m2 = s.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
   if (m2) return m2[1];
 
-  // https://www.youtube.com/embed/VIDEOID
   const m3 = s.match(/\/embed\/([a-zA-Z0-9_-]{11})/);
   if (m3) return m3[1];
 
@@ -103,10 +69,110 @@ function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
 }
 
-// --- Captions (English manual preferred; non-English ASR only) ---
 function normalizeCaptionLanguage(lang) {
   const requested = String(lang || "en").trim().toLowerCase();
   return requested || "en";
+}
+
+function extractJsonAfter(html, marker) {
+  const start = html.indexOf(marker);
+  if (start === -1) return null;
+
+  const jsonStart = html.indexOf("{", start + marker.length);
+  if (jsonStart === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = jsonStart; i < html.length; i += 1) {
+    const ch = html[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth += 1;
+    else if (ch === "}") depth -= 1;
+
+    if (depth === 0) {
+      try {
+        return JSON.parse(html.slice(jsonStart, i + 1));
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  return null;
+}
+
+function pickCaptionTrack(tracks, lang) {
+  const captionLang = normalizeCaptionLanguage(lang);
+  const isEnglish = captionLang === "en" || captionLang.startsWith("en-");
+  const candidates = isEnglish
+    ? tracks
+    : tracks.filter((track) => track.kind === "asr");
+
+  const exact = candidates.find((track) => track.languageCode === captionLang);
+  if (exact) return exact;
+
+  const prefix = candidates.find((track) => track.languageCode?.startsWith(`${captionLang}-`));
+  if (prefix) return prefix;
+
+  if (isEnglish) {
+    return (
+      candidates.find((track) => track.languageCode === "en" && track.kind !== "asr") ||
+      candidates.find((track) => track.languageCode === "en") ||
+      candidates.find((track) => track.languageCode?.startsWith("en-"))
+    );
+  }
+
+  return null;
+}
+
+function parseJson3Caption(data) {
+  return (data.events || [])
+    .filter((event) => event.segs?.length)
+    .map((event) => {
+      const start = (event.tStartMs || 0) / 1000;
+      const dur = (event.dDurationMs || 0) / 1000;
+      return {
+        start,
+        end: start + dur,
+        text: decodeEntities(event.segs.map((seg) => seg.utf8 || "").join("")),
+      };
+    })
+    .filter((event) => event.text.length > 0);
+}
+
+async function fetchCaptionEventsFromWatchPage(videoId, lang) {
+  const res = await fetch(`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`, {
+    headers: {
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+      "accept-language": "en-US,en;q=0.9,ko;q=0.8",
+    },
+  });
+  const html = await res.text();
+  const player = extractJsonAfter(html, "ytInitialPlayerResponse");
+  const status = player?.playabilityStatus;
+  if (status?.status === "ERROR") {
+    throw new Error(status.reason || "YouTube video is not playable");
+  }
+
+  const tracks = player?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+  const track = pickCaptionTrack(tracks, lang);
+  if (!track?.baseUrl) return [];
+
+  const url = new URL(track.baseUrl);
+  url.searchParams.set("fmt", "json3");
+
+  const captionRes = await fetch(url);
+  if (!captionRes.ok) return [];
+  return parseJson3Caption(await captionRes.json());
 }
 
 async function fetchCaptionEvents(videoId, lang = "en") {
@@ -144,7 +210,8 @@ async function fetchCaptionEvents(videoId, lang = "en") {
       if (events.length) return events;
     }
   }
-  return [];
+
+  return fetchCaptionEventsFromWatchPage(videoId, captionLang);
 }
 
 function segmentTextFromEvents(events, startSec, endSec) {
@@ -155,10 +222,9 @@ function segmentTextFromEvents(events, startSec, endSec) {
   const joined = decodeEntities(picked.join(" "));
   const maxLen = 180;
   if (!joined) return "";
-  return joined.length > maxLen ? joined.slice(0, maxLen).trim() + "…" : joined;
+  return joined.length > maxLen ? `${joined.slice(0, maxLen).trim()}...` : joined;
 }
 
-// --- SRS (simple Leitner-like levels) ---
 const LEVEL_INTERVAL_DAYS = [0, 1, 3, 7, 14, 30, 60, 120];
 
 function addMinutes(date, minutes) {
@@ -174,26 +240,23 @@ function addDays(date, days) {
 }
 
 function srsUpdate(seg, grade) {
-  // grade: again | hard | good | easy
   const maxLevel = LEVEL_INTERVAL_DAYS.length - 1;
   const now = new Date();
 
   seg.lastReviewedAt = nowIso();
   seg.reviewCount = (seg.reviewCount ?? 0) + 1;
-
   seg.level = Number.isFinite(seg.level) ? seg.level : 0;
   seg.lapseCount = seg.lapseCount ?? 0;
 
   if (grade === "again") {
     seg.lapseCount += 1;
     seg.level = clamp(seg.level - 1, 0, maxLevel);
-    seg.dueAt = addMinutes(now, 10).toISOString(); // quick retry
+    seg.dueAt = addMinutes(now, 10).toISOString();
     seg.lastGrade = "again";
     return seg;
   }
 
   if (grade === "hard") {
-    // keep level, but make it due sooner (1 day)
     seg.dueAt = addDays(now, 1).toISOString();
     seg.lastGrade = "hard";
     return seg;
@@ -213,16 +276,14 @@ function srsUpdate(seg, grade) {
     return seg;
   }
 
-  // default: treat as good
   seg.level = clamp(seg.level + 1, 0, maxLevel);
   seg.dueAt = addDays(now, LEVEL_INTERVAL_DAYS[seg.level]).toISOString();
   seg.lastGrade = "good";
   return seg;
 }
 
-// --- APIs ---
 app.get("/api/health", (req, res) => {
-  res.json({ ok: true, time: nowIso(), build: "review-minimal-v1" }); // ✅ 배포 확인용
+  res.json({ ok: true, time: nowIso(), build: "review-minimal-v2" });
 });
 
 app.get("/api/caption", async (req, res) => {
@@ -244,39 +305,27 @@ app.get("/api/caption", async (req, res) => {
   }
 });
 
-// ===============================
-// ✅ (1) 세그먼트 목록 가져오기 (filter 지원)
-// GET /api/segments
-// ===============================
 app.get("/api/segments", async (req, res) => {
   try {
     const { filter, sort } = req.query;
+    let query = supabase.from("segments").select("*");
 
-    let query = supabase
-      .from("segments")
-      .select("*");
-
-    // 🔥 filter=due 처리 (현재 시각 이전만)
     if (filter === "due") {
-      const nowIso = new Date().toISOString();
-      query = query.lte("due_at", nowIso);
+      query = query.lte("due_at", new Date().toISOString());
     }
 
-    // 정렬 처리
     if (sort === "due") {
       query = query.order("due_at", { ascending: true });
     } else if (sort === "oldest") {
       query = query.order("created_at", { ascending: true });
     } else {
-      // 기본 newest
       query = query.order("created_at", { ascending: false });
     }
 
     const { data, error } = await query;
-
     if (error) return res.status(500).json({ error: error.message });
 
-    const segments = (data || []).map(row => ({
+    const segments = (data || []).map((row) => ({
       id: row.id,
       videoId: row.video_id,
       start: Number(row.start_sec),
@@ -284,21 +333,15 @@ app.get("/api/segments", async (req, res) => {
       text: row.text_en,
       note: row.note,
       level: row.level,
-      dueAt: row.due_at
+      dueAt: row.due_at,
     }));
 
     return res.json({ segments });
-
   } catch (e) {
     return res.status(500).json({ error: String(e) });
   }
 });
 
-// ===============================
-// ✅ (2) 세그먼트 추가
-// POST /api/segments
-// body: { videoId, start, end, text, note }
-// ===============================
 app.post("/api/segments", async (req, res) => {
   try {
     const { videoId, start, end, text, note } = req.body || {};
@@ -307,8 +350,7 @@ app.post("/api/segments", async (req, res) => {
       return res.status(400).json({ error: "videoId/start/end required" });
     }
 
-    const nowIso = new Date().toISOString();
-
+    const now = new Date().toISOString();
     const { data, error } = await supabase
       .from("segments")
       .insert([{
@@ -318,32 +360,25 @@ app.post("/api/segments", async (req, res) => {
         text_en: typeof text === "string" ? text : "",
         note: typeof note === "string" ? note : "",
         level: 0,
-        due_at: nowIso,
-        updated_at: nowIso
+        due_at: now,
+        updated_at: now,
       }])
       .select("*")
       .single();
 
     if (error) return res.status(500).json({ error: error.message });
-
     return res.json({ ok: true, id: data.id });
   } catch (e) {
     return res.status(500).json({ error: String(e) });
   }
 });
 
-// ===============================
-// ✅ (3) 세그먼트 수정 (Edit)
-// PUT /api/segments/:id
-// body: { text, note, videoId, start, end, level, dueAt }
-// ===============================
 app.put("/api/segments/:id", async (req, res) => {
   try {
     const id = req.params.id;
     const { text, note, videoId, start, end, level, dueAt } = req.body || {};
-
-    // ✅ 업데이트할 값만 구성
     const patch = {};
+
     if (typeof text === "string") patch.text_en = text;
     if (typeof note === "string") patch.note = note;
     if (typeof videoId === "string" && videoId.trim()) patch.video_id = videoId.trim();
@@ -351,53 +386,30 @@ app.put("/api/segments/:id", async (req, res) => {
     if (typeof end === "number" && Number.isFinite(end)) patch.end_sec = end;
     if (typeof level === "number" && Number.isFinite(level)) patch.level = level;
     if (typeof dueAt === "string" && dueAt) patch.due_at = dueAt;
-
     patch.updated_at = new Date().toISOString();
 
-    const { error } = await supabase
-      .from("segments")
-      .update(patch)
-      .eq("id", id);
-
+    const { error } = await supabase.from("segments").update(patch).eq("id", id);
     if (error) return res.status(500).json({ error: error.message });
-
     return res.json({ ok: true });
   } catch (e) {
     return res.status(500).json({ error: String(e) });
   }
 });
 
-// ===============================
-// ✅ (4) 세그먼트 삭제
-// DELETE /api/segments/:id
-// ===============================
 app.delete("/api/segments/:id", async (req, res) => {
   try {
-    const id = req.params.id;
-
-    const { error } = await supabase
-      .from("segments")
-      .delete()
-      .eq("id", id);
-
+    const { error } = await supabase.from("segments").delete().eq("id", req.params.id);
     if (error) return res.status(500).json({ error: error.message });
-
     return res.json({ ok: true });
   } catch (e) {
     return res.status(500).json({ error: String(e) });
   }
 });
 
-// ===============================
-// ✅ 리뷰(grade) → Supabase 반영
-// POST /api/review/:id
-// body: { grade }
-// ===============================
 app.post("/api/review/:id", async (req, res) => {
   try {
     const id = req.params.id;
     const grade = String(req.body.grade || "good");
-
     const { data: seg, error: fetchError } = await supabase
       .from("segments")
       .select("id, level, due_at")
@@ -408,11 +420,7 @@ app.post("/api/review/:id", async (req, res) => {
       return res.status(404).json({ error: "not found" });
     }
 
-    const temp = {
-      level: seg.level ?? 0,
-      dueAt: seg.due_at
-    };
-
+    const temp = { level: seg.level ?? 0, dueAt: seg.due_at };
     srsUpdate(temp, grade);
 
     const { error: updateError } = await supabase
@@ -420,22 +428,17 @@ app.post("/api/review/:id", async (req, res) => {
       .update({
         level: temp.level,
         due_at: temp.dueAt,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       })
       .eq("id", id);
 
-    if (updateError) {
-      return res.status(500).json({ error: updateError.message });
-    }
-
+    if (updateError) return res.status(500).json({ error: updateError.message });
     return res.json({ ok: true });
-
   } catch (e) {
     return res.status(500).json({ error: String(e) });
   }
 });
 
-// fallback -> index.html (for direct open)
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
