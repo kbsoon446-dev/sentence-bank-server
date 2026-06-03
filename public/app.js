@@ -9,10 +9,23 @@ let currentIndex = -1;
 let reviewQueue = [];
 let reviewActive = false;
 let revealShown = false;
+let initialLoadStarted = false;
 
 function $(id) { return document.getElementById(id); }
 
 function setStatus(msg) { $("status").textContent = msg; }
+
+async function loadInitialSegments() {
+  if (initialLoadStarted) return;
+  initialLoadStarted = true;
+
+  try {
+    await fetchSegments();
+  } catch (e) {
+    console.error(e);
+    setStatus("API error");
+  }
+}
 
 function fmt(sec) {
   const m = Math.floor(sec / 60);
@@ -23,6 +36,14 @@ function fmt(sec) {
 function parseTimeToSeconds(s) {
   const t = String(s || "").trim();
   if (!t) return NaN;
+
+  if (/^\d{3,4}$/.test(t)) {
+    const mm = Number(t.slice(0, -2));
+    const ss = Number(t.slice(-2));
+    if (!Number.isFinite(mm) || !Number.isFinite(ss) || ss >= 60) return NaN;
+    return mm * 60 + ss;
+  }
+
   if (/^\d+(\.\d+)?$/.test(t)) return Number(t);
 
   // hh:mm:ss or mm:ss
@@ -593,12 +614,15 @@ window.onYouTubeIframeAPIReady = function () {
     },
     events: {
       onReady: async () => {
-        setStatus("ready");
-        await fetchSegments();
+        await loadInitialSegments();
       }
     }
   });
 };
+
+document.addEventListener("DOMContentLoaded", () => {
+  setTimeout(loadInitialSegments, 1200);
+});
 
 // ===== Pagination (10 per page) =====
 (() => {
