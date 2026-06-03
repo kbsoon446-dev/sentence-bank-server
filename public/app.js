@@ -1,4 +1,4 @@
-const API_BASE = "";
+const API_BASE = "https://sentence-bank-server.onrender.com";
 let player = null;
 let loopTimer = null;
 
@@ -133,7 +133,7 @@ async function fetchSegments() {
   const filter = $("filter").value;
   const q = $("q").value.trim();
 
-  const url = new URL(`${API_BASE}/api/segments`, window.location.origin);
+  const url = new URL("https://sentence-bank-server.onrender.com/api/segments", window.location.origin);
   url.searchParams.set("sort", sort);
   url.searchParams.set("filter", filter);
   if (q) url.searchParams.set("q", q);
@@ -206,7 +206,7 @@ function renderList() {
     el.querySelector('[data-act="review"]').onclick = () => startSingleReview(seg.id);
     el.querySelector('[data-act="del"]').onclick = async () => {
       if (!confirm("Delete this segment?")) return;
-      await fetch(`${API_BASE}/api/segments/${encodeURIComponent(seg.id)}`, { method: "DELETE" });
+      await fetch(`https://sentence-bank-server.onrender.com/api/segments/${encodeURIComponent(seg.id)}`, { method: "DELETE" });
       await fetchSegments();
     }
     // =======================
@@ -307,9 +307,14 @@ async function fetchCaptionIntoText() {
   const res = await fetch(url.toString());
 const data = await res.json().catch(() => ({}));
 
-// ✅ 서버가 에러 주면 경고 띄우기
 if (!res.ok || data.error) {
-  alert("자막 가져오기 실패: " + (data.error || res.statusText || "unknown error"));
+  const error = data.error || res.statusText || "unknown error";
+  const isMetadataBlocked = error.includes("caption metadata") || error.includes("not playable");
+  alert(
+    isMetadataBlocked
+      ? "이 영상은 서버에서 YouTube 자막 정보를 가져올 수 없어요.\n\n가능한 이유:\n- 영상이 비공개/삭제/지역제한/로그인 필요 상태\n- YouTube가 서버 요청에는 자막 정보를 숨김\n- 해당 언어의 자막/자동자막이 없음\n\n브라우저에서 영상이 재생돼도 서버에서는 자막 접근이 막힐 수 있어요."
+      : "자막 가져오기 실패: " + error
+  );
   setStatus("ready");
   return;
 }
@@ -317,9 +322,8 @@ if (!res.ok || data.error) {
 // ✅ 정상일 때만 채우기
 $("text").value = data.text || "";
 
-// ✅ 자막이 빈 경우도 알려주기(자막 없는 영상일 수 있음)
 if (!$("text").value.trim()) {
-  alert("영어 자막/자동자막을 찾지 못했어요. (영상에 자막이 없거나, 가져오기가 막혔을 수 있어요)");
+  alert("영어 자막/자동자막을 찾지 못했어요. 영상에 자막이 없거나, YouTube가 서버 요청을 막았을 수 있어요.");
 }
 
 setStatus("ready");
@@ -340,7 +344,7 @@ async function saveSegment() {
   }
 
   setStatus("saving…");
-  const res = await fetch(`${API_BASE}/api/segments`, {
+  const res = await fetch("https://sentence-bank-server.onrender.com/api/segments", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ youtube, videoId, start, end, text, note })
@@ -396,7 +400,7 @@ async function startDueReview() {
   showReviewBox(true);
 
   // get a fresh due list in due order
-  const url = new URL(`${API_BASE}/api/segments`, window.location.origin);
+  const url = new URL("https://sentence-bank-server.onrender.com/api/segments");
   url.searchParams.set("sort", "due");
   url.searchParams.set("filter", "due");
   const res = await fetch(url.toString());
