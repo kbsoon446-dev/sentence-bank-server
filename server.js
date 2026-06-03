@@ -6,6 +6,7 @@ import fs from "fs/promises";
 import { XMLParser } from "fast-xml-parser";
 import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
+import ytdl from "@distube/ytdl-core";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +19,9 @@ app.use(cors());
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_TRANSCRIBE_MODEL = process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1";
+const MAX_AI_AUDIO_BYTES = Number(process.env.MAX_AI_AUDIO_BYTES || 24 * 1024 * 1024);
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   console.error("Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY in .env.");
@@ -308,6 +312,72 @@ async function fetchCaptionEventsFromInnertube(videoId, lang, ytcfg = {}) {
   return [];
 }
 
+async function downloadYouTubeAudio(videoId) {
+  const youtubeUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+  const stream = ytdl(youtubeUrl, {
+    filter: "audioonly",
+    quality: "lowestaudio",
+    highWaterMark: 1 << 25,
+    requestOptions: {
+      headers: {
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+        "accept-language": "en-US,en;q=0.9,ko;q=0.8",
+      },
+    },
+  });
+
+  const chunks = [];
+  let total = 0;
+
+  for await (const chunk of stream) {
+    total += chunk.length;
+    if (total > MAX_AI_AUDIO_BYTES) {
+      stream.destroy();
+      throw new Error("Audio is too large for AI transcription");
+    }
+    chunks.push(chunk);
+  }
+
+  return Buffer.concat(chunks);
+}
+
+async function transcribeYouTubeAudio(videoId) {
+  if (!OPENAI_API_KEY) return [];
+
+  const audio = await downloadYouTubeAudio(videoId);
+  const form = new FormData();
+  form.append("file", new Blob([audio], { type: "audio/webm" }), `${videoId}.webm`);
+  form.append("model", OPENAI_TRANSCRIBE_MODEL);
+  form.append("language", "en");
+  form.append("response_format", "verbose_json");
+
+  const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: form,
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error?.message || "AI transcription failed");
+  }
+
+  if (Array.isArray(data.segments) && data.segments.length) {
+    return data.segments
+      .map((segment) => ({
+        start: Number(segment.start || 0),
+        end: Number(segment.end || segment.start || 0),
+        text: decodeEntities(segment.text || ""),
+      }))
+      .filter((event) => event.text.length > 0);
+  }
+
+  const text = decodeEntities(data.text || "");
+  return text ? [{ start: 0, end: Number.POSITIVE_INFINITY, text }] : [];
+}
+
 async function fetchCaptionEventsFromWatchPage(videoId, lang) {
   const res = await fetch(`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`, {
     headers: {
@@ -373,7 +443,13 @@ async function fetchCaptionEvents(videoId, lang = "en") {
     }
   }
 
-  return fetchCaptionEventsFromWatchPage(videoId, captionLang);
+  try {
+    return await fetchCaptionEventsFromWatchPage(videoId, captionLang);
+  } catch (captionError) {
+    const aiEvents = await transcribeYouTubeAudio(videoId);
+    if (aiEvents.length) return aiEvents;
+    throw captionError;
+  }
 }
 
 function segmentTextFromEvents(events, startSec, endSec) {
