@@ -1,4 +1,4 @@
-const API_BASE = "https://sentence-bank-server.onrender.com";
+const API_BASE = "";
 let player = null;
 let loopTimer = null;
 
@@ -133,7 +133,7 @@ async function fetchSegments() {
   const filter = $("filter").value;
   const q = $("q").value.trim();
 
-  const url = new URL("https://sentence-bank-server.onrender.com/api/segments", window.location.origin);
+  const url = new URL(`${API_BASE}/api/segments`, window.location.origin);
   url.searchParams.set("sort", sort);
   url.searchParams.set("filter", filter);
   if (q) url.searchParams.set("q", q);
@@ -206,7 +206,7 @@ function renderList() {
     el.querySelector('[data-act="review"]').onclick = () => startSingleReview(seg.id);
     el.querySelector('[data-act="del"]').onclick = async () => {
       if (!confirm("Delete this segment?")) return;
-      await fetch(`https://sentence-bank-server.onrender.com/api/segments/${encodeURIComponent(seg.id)}`, { method: "DELETE" });
+      await fetch(`${API_BASE}/api/segments/${encodeURIComponent(seg.id)}`, { method: "DELETE" });
       await fetchSegments();
     }
     // =======================
@@ -340,7 +340,7 @@ async function saveSegment() {
   }
 
   setStatus("saving…");
-  const res = await fetch("https://sentence-bank-server.onrender.com/api/segments", {
+  const res = await fetch(`${API_BASE}/api/segments`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ youtube, videoId, start, end, text, note })
@@ -396,7 +396,7 @@ async function startDueReview() {
   showReviewBox(true);
 
   // get a fresh due list in due order
-  const url = new URL("https://sentence-bank-server.onrender.com/api/segments");
+  const url = new URL(`${API_BASE}/api/segments`, window.location.origin);
   url.searchParams.set("sort", "due");
   url.searchParams.set("filter", "due");
   const res = await fetch(url.toString());
