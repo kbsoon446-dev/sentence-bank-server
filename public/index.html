@@ -48,6 +48,15 @@
       </label>
 
       <label class="field">
+        <div class="label">Manual subtitles / transcript (optional)</div>
+        <textarea id="manualSubs" rows="5" placeholder="Paste SRT/VTT, TubeEng subtitles, or YouTube transcript here"></textarea>
+      </label>
+
+      <div class="row">
+        <button id="btnManualFill" class="btn">Use pasted subtitles for this segment</button>
+      </div>
+
+      <label class="field">
         <div class="label">Note (optional)</div>
         <input id="note" placeholder="What was hard to hear? (linking, reductions, etc.)" />
       </label>
@@ -158,5 +167,6 @@
 
   <script src="https://www.youtube.com/iframe_api"></script>
   <script src="/app.js"></script>
+  <script src="/manual-subtitles.js"></script>
 </body>
 </html>
