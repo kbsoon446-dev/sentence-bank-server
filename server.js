@@ -117,6 +117,13 @@ function pickCaptionTrack(tracks, lang) {
     ? tracks
     : tracks.filter((track) => track.kind === "asr");
 
+  const manualCandidates = candidates.filter((track) => track.kind !== "asr");
+  const exactManual = manualCandidates.find((track) => track.languageCode === captionLang);
+  if (exactManual) return exactManual;
+
+  const prefixManual = manualCandidates.find((track) => track.languageCode?.startsWith(`${captionLang}-`));
+  if (prefixManual) return prefixManual;
+
   const exact = candidates.find((track) => track.languageCode === captionLang);
   if (exact) return exact;
 
@@ -228,6 +235,10 @@ function segmentTextFromEvents(events, startSec, endSec) {
   return joined.length > maxLen ? `${joined.slice(0, maxLen).trim()}...` : joined;
 }
 
+function transcriptTextFromEvents(events) {
+  return decodeEntities(events.map((event) => event.text).join(" "));
+}
+
 const LEVEL_INTERVAL_DAYS = [0, 1, 3, 7, 14, 30, 60, 120];
 
 function addMinutes(date, minutes) {
@@ -303,6 +314,23 @@ app.get("/api/caption", async (req, res) => {
     const events = await fetchCaptionEvents(videoId, lang);
     const text = events.length ? segmentTextFromEvents(events, start, end) : "";
     return res.json({ text, lang });
+  } catch (e) {
+    return res.status(500).json({ error: String(e) });
+  }
+});
+
+app.get("/api/transcript", async (req, res) => {
+  try {
+    const videoId = parseVideoId(req.query.videoId);
+    const lang = normalizeCaptionLanguage(req.query.lang);
+
+    if (!videoId) {
+      return res.status(400).json({ error: "videoId invalid" });
+    }
+
+    const events = await fetchCaptionEvents(videoId, lang);
+    const text = events.length ? transcriptTextFromEvents(events) : "";
+    return res.json({ text, lang, eventCount: events.length });
   } catch (e) {
     return res.status(500).json({ error: String(e) });
   }
