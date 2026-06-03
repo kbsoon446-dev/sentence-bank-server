@@ -158,6 +158,9 @@ async function fetchCaptionEventsFromWatchPage(videoId, lang) {
   });
   const html = await res.text();
   const player = extractJsonAfter(html, "ytInitialPlayerResponse");
+  if (!player) {
+    throw new Error("YouTube caption metadata is not available for this video");
+  }
   const status = player?.playabilityStatus;
   if (status?.status === "ERROR") {
     throw new Error(status.reason || "YouTube video is not playable");
@@ -283,7 +286,7 @@ function srsUpdate(seg, grade) {
 }
 
 app.get("/api/health", (req, res) => {
-  res.json({ ok: true, time: nowIso(), build: "review-minimal-v2" });
+  res.json({ ok: true, time: nowIso(), build: "review-minimal-v3" });
 });
 
 app.get("/api/caption", async (req, res) => {
