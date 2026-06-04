@@ -46,6 +46,24 @@ function parseManualVideoId(input) {
   return "";
 }
 
+function getManualYouTubeUrl() {
+  const input = byId("youtube").value.trim();
+  const videoId = parseManualVideoId(input);
+  if (videoId) return `https://www.youtube.com/watch?v=${videoId}`;
+  return input;
+}
+
+async function openTranscriptTool() {
+  const youtubeUrl = getManualYouTubeUrl();
+
+  if (youtubeUrl && navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(youtubeUrl).catch(() => null);
+    setManualStatus("copied video URL");
+  }
+
+  window.open("https://www.youtube-transcript.io/", "_blank", "noopener,noreferrer");
+}
+
 function cleanManualSubtitleLine(line) {
   return String(line || "")
     .replace(/<[^>]+>/g, " ")
@@ -258,6 +276,9 @@ async function fetchTranscriptOrManualIntoText() {
 }
 
 function installManualSubtitleHandlers() {
+  const transcriptToolButton = byId("btnOpenTranscriptTool");
+  if (transcriptToolButton) transcriptToolButton.onclick = openTranscriptTool;
+
   const manualButton = byId("btnManualFill");
   if (manualButton) manualButton.onclick = () => fillTextFromManualSubtitles();
 
