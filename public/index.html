@@ -26,19 +26,17 @@
         </label>
 
         <label class="field">
-          <div class="label">Start</div>
-          <input id="start" placeholder="7:32" />
-        </label>
-
-        <label class="field">
-          <div class="label">End</div>
-          <input id="end" placeholder="7:38" />
+          <div class="label">Time range</div>
+          <input id="timeRange" inputmode="numeric" placeholder="0423 0428" />
         </label>
       </div>
+      <input id="start" type="hidden" />
+      <input id="end" type="hidden" />
+      <input id="note" type="hidden" value="" />
 
       <div class="row">
         <button id="btnFetch" class="btn">Fetch English subtitle</button>
-        <button id="btnTranscript" class="btn">Fetch full script</button>
+        <button id="btnTranscript" class="btn" hidden>Fetch full script</button>
         <button id="btnSave" class="btn primary">Save</button>
       </div>
 
@@ -49,22 +47,17 @@
 
       <label class="field">
         <div class="label">Manual subtitles / transcript (optional)</div>
-        <textarea id="manualSubs" rows="5" placeholder="Paste SRT/VTT, TubeEng subtitles, or YouTube transcript here"></textarea>
+        <textarea id="manualSubs" rows="2" placeholder="Paste SRT/VTT, TubeEng subtitles, or YouTube transcript here"></textarea>
       </label>
 
       <div class="row">
         <button id="btnOpenTranscriptTool" class="btn">Open transcript tool</button>
-        <button id="btnCopyTranscriptMacro" class="btn">Copy transcript macro</button>
-        <button id="btnManualFill" class="btn">Use pasted subtitles for this segment</button>
+        <button id="btnCopyTranscriptMacro" class="btn" hidden>Copy transcript macro</button>
+        <button id="btnManualFill" class="btn" hidden>Use pasted subtitles for this segment</button>
       </div>
 
-      <label class="field">
-        <div class="label">Note (optional)</div>
-        <input id="note" placeholder="What was hard to hear? (linking, reductions, etc.)" />
-      </label>
-
       <div class="hint">
-        Tip: You can type time as <b>mm:ss</b> (e.g. 7:32), compact <b>mmss</b> (e.g. 0732), or seconds (e.g. 452).
+        Tip: Type both times together, like <b>0423 0428</b>, <b>4:23 4:28</b>, or <b>0423-0428</b>.
       </div>
     </section>
 
@@ -86,7 +79,7 @@
       </div>
 
       <div class="row">
-        <input id="q" class="search" placeholder="Search text / note / videoId" />
+        <input id="q" class="search" placeholder="Search text / videoId" />
         <button id="btnRefresh" class="btn">Refresh</button>
       </div>
 
@@ -170,5 +163,63 @@
   <script src="https://www.youtube.com/iframe_api"></script>
   <script src="/app.js"></script>
   <script src="/manual-subtitles.js"></script>
+  <script>
+    (() => {
+      const byId = (id) => document.getElementById(id);
+      const parseTime = (value) => {
+        const text = String(value || "").trim();
+        if (/^\d{3,4}$/.test(text)) return Number(text.slice(0, -2)) * 60 + Number(text.slice(-2));
+        if (/^\d+(\.\d+)?$/.test(text)) return Number(text);
+        const parts = text.split(":").map(Number);
+        if (parts.some((part) => !Number.isFinite(part))) return NaN;
+        if (parts.length === 2) return parts[0] * 60 + parts[1];
+        if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+        return NaN;
+      };
+      const parseRange = (value) => {
+        const text = String(value || "").trim();
+        const time = "\\d{1,2}:\\d{2}(?::\\d{2})?|\\d{3,4}|\\d+(?:\\.\\d+)?";
+        const pair = text.match(new RegExp(`^\\s*(${time})\\s*(?:-|~|,|/|\\s+)\\s*(${time})\\s*$`));
+        if (pair) return { start: pair[1], end: pair[2] };
+        if (/^\d{6,8}$/.test(text)) {
+          const mid = Math.floor(text.length / 2);
+          return { start: text.slice(0, mid), end: text.slice(mid) };
+        }
+        return null;
+      };
+      const syncRange = (silent = false) => {
+        const input = byId("timeRange");
+        if (!input) return true;
+        const range = parseRange(input.value);
+        if (!range) {
+          if (!silent) alert("Enter both times together, like 0423 0428 or 4:23 4:28.");
+          return false;
+        }
+        const start = parseTime(range.start);
+        const end = parseTime(range.end);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+          if (!silent) alert("Check the time range. End must be after start.");
+          return false;
+        }
+        byId("start").value = range.start;
+        byId("end").value = range.end;
+        return true;
+      };
+      const input = byId("timeRange");
+      input?.addEventListener("input", () => syncRange(true));
+      input?.addEventListener("blur", () => syncRange(true));
+      for (const id of ["btnFetch", "btnSave"]) {
+        const button = byId(id);
+        if (!button) continue;
+        const original = button.onclick;
+        button.onclick = async function (...args) {
+          if (!syncRange(false)) return;
+          const result = original ? await original.apply(this, args) : undefined;
+          if (id === "btnSave" && !byId("start").value && !byId("end").value && input) input.value = "";
+          return result;
+        };
+      }
+    })();
+  </script>
 </body>
 </html>
