@@ -524,7 +524,7 @@ async function fetchCaptionEvents(videoId, lang = "en") {
 
 function segmentTextFromEvents(events, startSec, endSec) {
   const picked = events
-    .filter((e) => e.end > startSec && e.start < endSec)
+    .filter((e) => e.start >= startSec && e.start < endSec)
     .map((e) => e.text);
 
   const joined = decodeEntities(picked.join(" "));
