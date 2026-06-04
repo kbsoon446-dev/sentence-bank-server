@@ -29,6 +29,45 @@ function parseManualTimeToSeconds(value) {
   return NaN;
 }
 
+function parseManualTimeRange(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+
+  const timePattern = "\\d{1,2}:\\d{2}(?::\\d{2})?|\\d{3,4}|\\d+(?:\\.\\d+)?";
+  const pair = text.match(new RegExp(`^\\s*(${timePattern})\\s*(?:-|~|,|/|\\s+)\\s*(${timePattern})\\s*$`));
+  if (pair) return { start: pair[1], end: pair[2] };
+
+  if (/^\d{6,8}$/.test(text)) {
+    const middle = Math.floor(text.length / 2);
+    return { start: text.slice(0, middle), end: text.slice(middle) };
+  }
+
+  return null;
+}
+
+function syncManualTimeRange(options = {}) {
+  const silent = Boolean(options.silent);
+  const rangeInput = byId("timeRange");
+  if (!rangeInput) return true;
+
+  const parsed = parseManualTimeRange(rangeInput.value);
+  if (!parsed) {
+    if (!silent) alert("Enter both times together, like 0423 0428 or 4:23 4:28.");
+    return false;
+  }
+
+  const startSec = parseManualTimeToSeconds(parsed.start);
+  const endSec = parseManualTimeToSeconds(parsed.end);
+  if (!Number.isFinite(startSec) || !Number.isFinite(endSec) || endSec <= startSec) {
+    if (!silent) alert("Check the time range. End must be after start.");
+    return false;
+  }
+
+  byId("start").value = parsed.start;
+  byId("end").value = parsed.end;
+  return true;
+}
+
 function parseManualVideoId(input) {
   const text = String(input || "").trim();
   if (!text) return "";
@@ -196,7 +235,7 @@ function parseManualSubtitleEvents(raw) {
 function manualTextFromEvents(events, start, end) {
   return normalizeManualSubtitleText(
     events
-      .filter((event) => event.end > start && event.start < end)
+      .filter((event) => event.start >= start && event.start < end)
       .map((event) => event.text)
       .join(" ")
   );
@@ -204,6 +243,8 @@ function manualTextFromEvents(events, start, end) {
 
 function fillTextFromManualSubtitles(options = {}) {
   const silent = Boolean(options.silent);
+  if (!syncManualTimeRange({ silent })) return false;
+
   const raw = byId("manualSubs").value.trim();
   const start = parseManualTimeToSeconds(byId("start").value);
   const end = parseManualTimeToSeconds(byId("end").value);
@@ -236,6 +277,8 @@ function fillTextFromManualSubtitles(options = {}) {
 }
 
 async function fetchCaptionOrManualIntoText() {
+  if (!syncManualTimeRange()) return;
+
   const videoId = parseManualVideoId(byId("youtube").value);
   const start = parseManualTimeToSeconds(byId("start").value);
   const end = parseManualTimeToSeconds(byId("end").value);
@@ -297,6 +340,12 @@ async function fetchTranscriptOrManualIntoText() {
 }
 
 function installManualSubtitleHandlers() {
+  const timeRangeInput = byId("timeRange");
+  if (timeRangeInput) {
+    timeRangeInput.addEventListener("input", () => syncManualTimeRange({ silent: true }));
+    timeRangeInput.addEventListener("blur", () => syncManualTimeRange({ silent: true }));
+  }
+
   const transcriptToolButton = byId("btnOpenTranscriptTool");
   if (transcriptToolButton) transcriptToolButton.onclick = openTranscriptTool;
 
@@ -311,6 +360,19 @@ function installManualSubtitleHandlers() {
 
   const transcriptButton = byId("btnTranscript");
   if (transcriptButton) transcriptButton.onclick = fetchTranscriptOrManualIntoText;
+
+  const saveButton = byId("btnSave");
+  if (saveButton) {
+    const originalSave = saveButton.onclick;
+    saveButton.onclick = async function (...args) {
+      if (!syncManualTimeRange()) return;
+      const result = originalSave ? await originalSave.apply(this, args) : undefined;
+      if (!byId("start").value && !byId("end").value && timeRangeInput) {
+        timeRangeInput.value = "";
+      }
+      return result;
+    };
+  }
 }
 
 installManualSubtitleHandlers();
