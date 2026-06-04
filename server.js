@@ -20,6 +20,7 @@ app.use(cors());
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const YOUTUBE_TRANSCRIPT_IO_TOKEN = process.env.YOUTUBE_TRANSCRIPT_IO_TOKEN;
 const OPENAI_TRANSCRIBE_MODEL = process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1";
 const MAX_AI_AUDIO_BYTES = Number(process.env.MAX_AI_AUDIO_BYTES || 24 * 1024 * 1024);
 
@@ -380,6 +381,60 @@ async function transcribeYouTubeAudio(videoId) {
   return text ? [{ start: 0, end: Number.POSITIVE_INFINITY, text }] : [];
 }
 
+function transcriptIoEventsFromItem(item) {
+  const rawEvents =
+    item?.segments ||
+    item?.transcript ||
+    item?.tracks?.[0]?.transcript ||
+    item?.tracks?.[0]?.segments ||
+    [];
+
+  if (Array.isArray(rawEvents)) {
+    return rawEvents
+      .map((event) => {
+        const start = Number(event.start ?? event.offset ?? event.startTime ?? 0);
+        const duration = Number(event.duration ?? event.dur ?? 0);
+        const explicitEnd = Number(event.end ?? event.endTime);
+        return {
+          start,
+          end: Number.isFinite(explicitEnd) && explicitEnd > start ? explicitEnd : start + duration,
+          text: decodeEntities(event.text ?? event.caption ?? event.content ?? ""),
+        };
+      })
+      .filter((event) => Number.isFinite(event.start) && event.text.length > 0);
+  }
+
+  const text = decodeEntities(item?.text || item?.transcript || "");
+  return text ? [{ start: 0, end: Number.POSITIVE_INFINITY, text }] : [];
+}
+
+async function fetchCaptionEventsFromTranscriptIo(videoId) {
+  if (!YOUTUBE_TRANSCRIPT_IO_TOKEN) {
+    throw new Error("youtube-transcript.io API is not configured. Set YOUTUBE_TRANSCRIPT_IO_TOKEN on Render.");
+  }
+
+  const res = await fetch("https://www.youtube-transcript.io/api/transcripts", {
+    method: "POST",
+    headers: {
+      authorization: `Basic ${YOUTUBE_TRANSCRIPT_IO_TOKEN}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ ids: [videoId] }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.message || data?.error || `youtube-transcript.io API failed (${res.status})`);
+  }
+
+  const item = Array.isArray(data) ? data[0] : data?.transcripts?.[0] || data?.data?.[0] || data?.results?.[0] || data;
+  const events = transcriptIoEventsFromItem(item);
+  if (!events.length) {
+    throw new Error("youtube-transcript.io returned no transcript text");
+  }
+  return events;
+}
+
 async function fetchCaptionEventsFromWatchPage(videoId, lang) {
   const res = await fetch(`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`, {
     headers: {
@@ -448,6 +503,15 @@ async function fetchCaptionEvents(videoId, lang = "en") {
   try {
     return await fetchCaptionEventsFromWatchPage(videoId, captionLang);
   } catch (captionError) {
+    try {
+      const transcriptIoEvents = await fetchCaptionEventsFromTranscriptIo(videoId);
+      if (transcriptIoEvents.length) return transcriptIoEvents;
+    } catch (transcriptIoError) {
+      if (YOUTUBE_TRANSCRIPT_IO_TOKEN) {
+        console.warn(`youtube-transcript.io fallback failed: ${transcriptIoError.message}`);
+      }
+    }
+
     try {
       const aiEvents = await transcribeYouTubeAudio(videoId);
       if (aiEvents.length) return aiEvents;
