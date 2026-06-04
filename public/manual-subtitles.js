@@ -54,6 +54,8 @@ function getManualYouTubeUrl() {
 }
 
 async function openTranscriptTool() {
+  const input = byId("youtube").value.trim();
+  const videoId = parseManualVideoId(input);
   const youtubeUrl = getManualYouTubeUrl();
 
   if (youtubeUrl && navigator.clipboard && window.isSecureContext) {
@@ -61,7 +63,26 @@ async function openTranscriptTool() {
     setManualStatus("copied video URL");
   }
 
-  window.open("https://www.youtube-transcript.io/", "_blank", "noopener,noreferrer");
+  const transcriptUrl = videoId
+    ? `https://www.youtube-transcript.io/videos/${videoId}`
+    : "https://www.youtube-transcript.io/";
+  window.open(transcriptUrl, "_blank", "noopener,noreferrer");
+}
+
+function buildTranscriptMacro() {
+  const source = `async()=>{const sleep=t=>new Promise(r=>setTimeout(r,t));const visible=e=>e&&!!(e.offsetWidth||e.offsetHeight||e.getClientRects().length);const text=e=>(e?.innerText||e?.textContent||"").replace(/\\s+/g," ").trim();const all=s=>[...document.querySelectorAll(s)].filter(visible);const clickText=async(re)=>{const el=all("button,a,[role=button],[role=menuitem],label").find(e=>re.test(text(e)));if(!el)return false;el.click();await sleep(700);return true};if(!/youtube-transcript\\.io$/.test(location.hostname)){alert("Open this macro on youtube-transcript.io");return}const copyButton=all("button").find(e=>/copy transcript/i.test(text(e)));if(copyButton){const box=copyButton.closest("div")||copyButton.parentElement;const buttons=box?[...box.querySelectorAll("button")].filter(visible):[];const more=buttons.find(b=>b!==copyButton&&!text(b))||buttons[buttons.length-1];if(more&&more!==copyButton){more.click();await sleep(700)}}else{const more=all("button,[role=button]").find(e=>/more|menu|options/i.test(e.getAttribute("aria-label")||"")||text(e)==="...");if(more){more.click();await sleep(700)}}await clickText(/^edit$/i);await sleep(1000);let sw=all('[role=switch],input[type=checkbox]').find(e=>/include timestamps/i.test(text(e.closest("label")||e.parentElement||e)));if(!sw){const label=all("label,div,span").find(e=>/^include timestamps$/i.test(text(e)));sw=label&&((label.closest("label")||label.parentElement)?.querySelector('[role=switch],input[type=checkbox]'))}if(sw){const checked=sw.checked||sw.getAttribute("aria-checked")==="true"||sw.getAttribute("data-state")==="checked";if(!checked){sw.click();await sleep(800)}}const area=all("textarea").sort((a,b)=>(b.value||"").length-(a.value||"").length)[0];if(area&&area.value){await navigator.clipboard.writeText(area.value);alert("Timestamped transcript copied.");return}if(await clickText(/^copy$/i)){alert("Copy clicked. Paste it into Sentence Bank.");return}alert("Could not find transcript text. Open Edit and try again.")}`;
+  return `javascript:(${source})()`;
+}
+
+async function copyTranscriptMacro() {
+  const macro = buildTranscriptMacro();
+  if (!navigator.clipboard || !window.isSecureContext) {
+    alert("Clipboard is not available in this browser. Create a bookmark and use the copied macro code manually.");
+    return;
+  }
+
+  await navigator.clipboard.writeText(macro);
+  alert("Macro copied. Create a browser bookmark with this as the URL, then click it on youtube-transcript.io after opening a transcript page.");
 }
 
 function cleanManualSubtitleLine(line) {
@@ -278,6 +299,9 @@ async function fetchTranscriptOrManualIntoText() {
 function installManualSubtitleHandlers() {
   const transcriptToolButton = byId("btnOpenTranscriptTool");
   if (transcriptToolButton) transcriptToolButton.onclick = openTranscriptTool;
+
+  const macroButton = byId("btnCopyTranscriptMacro");
+  if (macroButton) macroButton.onclick = copyTranscriptMacro;
 
   const manualButton = byId("btnManualFill");
   if (manualButton) manualButton.onclick = () => fillTextFromManualSubtitles();
