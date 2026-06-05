@@ -537,7 +537,13 @@ function transcriptTextFromEvents(events) {
   return decodeEntities(events.map((event) => event.text).join(" "));
 }
 
-const LEVEL_INTERVAL_DAYS = [0, 1, 3, 7, 14, 30, 60, 120];
+const ANKI_LEARNING_STEPS_MINUTES = [1, 10];
+const ANKI_GRADUATING_INTERVAL_DAYS = 1;
+const ANKI_EASY_INTERVAL_DAYS = 4;
+const ANKI_HARD_FACTOR = 1.2;
+const ANKI_GOOD_FACTOR = 2.5;
+const ANKI_EASY_BONUS = 1.3;
+const ANKI_MAX_INTERVAL_DAYS = 36500;
 
 function addMinutes(date, minutes) {
   const d = new Date(date.getTime());
@@ -547,12 +553,28 @@ function addMinutes(date, minutes) {
 
 function addDays(date, days) {
   const d = new Date(date.getTime());
-  d.setDate(d.getDate() + days);
+  d.setTime(d.getTime() + days * 24 * 60 * 60 * 1000);
   return d;
 }
 
+function intervalDaysForLevel(level) {
+  const graduatedLevel = Math.max(1, Number(level) || 1);
+  if (graduatedLevel === 1) return ANKI_GRADUATING_INTERVAL_DAYS;
+  if (graduatedLevel === 2) return 3;
+
+  const interval = Math.round(3 * Math.pow(ANKI_GOOD_FACTOR, graduatedLevel - 2));
+  return clamp(interval, ANKI_GRADUATING_INTERVAL_DAYS, ANKI_MAX_INTERVAL_DAYS);
+}
+
+function scheduleInMinutes(now, minutes) {
+  return addMinutes(now, minutes).toISOString();
+}
+
+function scheduleInDays(now, days) {
+  return addDays(now, clamp(days, ANKI_GRADUATING_INTERVAL_DAYS, ANKI_MAX_INTERVAL_DAYS)).toISOString();
+}
+
 function srsUpdate(seg, grade) {
-  const maxLevel = LEVEL_INTERVAL_DAYS.length - 1;
   const now = new Date();
 
   seg.lastReviewedAt = nowIso();
@@ -562,34 +584,53 @@ function srsUpdate(seg, grade) {
 
   if (grade === "again") {
     seg.lapseCount += 1;
-    seg.level = clamp(seg.level - 1, 0, maxLevel);
-    seg.dueAt = addMinutes(now, 10).toISOString();
+    seg.level = 0;
+    seg.dueAt = scheduleInMinutes(now, ANKI_LEARNING_STEPS_MINUTES[0]);
     seg.lastGrade = "again";
     return seg;
   }
 
   if (grade === "hard") {
-    seg.dueAt = addDays(now, 1).toISOString();
+    if (seg.level <= 0) {
+      seg.level = 0;
+      seg.dueAt = scheduleInMinutes(now, ANKI_LEARNING_STEPS_MINUTES[1]);
+    } else {
+      const currentInterval = intervalDaysForLevel(seg.level);
+      const hardInterval = Math.max(1, Math.round(currentInterval * ANKI_HARD_FACTOR));
+      seg.dueAt = scheduleInDays(now, hardInterval);
+    }
     seg.lastGrade = "hard";
     return seg;
   }
 
   if (grade === "good") {
-    seg.level = clamp(seg.level + 1, 0, maxLevel);
-    seg.dueAt = addDays(now, LEVEL_INTERVAL_DAYS[seg.level]).toISOString();
+    if (seg.level <= 0) {
+      seg.level = 1;
+      seg.dueAt = scheduleInDays(now, ANKI_GRADUATING_INTERVAL_DAYS);
+    } else {
+      seg.level += 1;
+      seg.dueAt = scheduleInDays(now, intervalDaysForLevel(seg.level));
+    }
     seg.lastGrade = "good";
     return seg;
   }
 
   if (grade === "easy") {
-    seg.level = clamp(seg.level + 2, 0, maxLevel);
-    seg.dueAt = addDays(now, LEVEL_INTERVAL_DAYS[seg.level]).toISOString();
+    if (seg.level <= 0) {
+      seg.level = 2;
+      seg.dueAt = scheduleInDays(now, ANKI_EASY_INTERVAL_DAYS);
+    } else {
+      const currentInterval = intervalDaysForLevel(seg.level);
+      seg.level += 2;
+      const easyInterval = Math.max(intervalDaysForLevel(seg.level), Math.round(currentInterval * ANKI_GOOD_FACTOR * ANKI_EASY_BONUS));
+      seg.dueAt = scheduleInDays(now, easyInterval);
+    }
     seg.lastGrade = "easy";
     return seg;
   }
 
-  seg.level = clamp(seg.level + 1, 0, maxLevel);
-  seg.dueAt = addDays(now, LEVEL_INTERVAL_DAYS[seg.level]).toISOString();
+  seg.level += 1;
+  seg.dueAt = scheduleInDays(now, intervalDaysForLevel(seg.level));
   seg.lastGrade = "good";
   return seg;
 }
