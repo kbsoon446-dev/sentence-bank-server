@@ -160,6 +160,96 @@ function srsUpdate(seg, grade) {
   return seg;
 }
 
+const OPENAI_API_KEY = env("OPENAI_API_KEY");
+const SPEAKING_GRADES = new Set(["again", "hard", "good", "easy"]);
+
+function speakingFromRow(row) {
+  return {
+    id: row.id,
+    situation: row.situation,
+    wantedKo: row.wanted_ko,
+    actualAttempt: row.actual_attempt,
+    targetExpression: row.target_expression,
+    conciseExpression: row.concise_expression,
+    alternatives: row.alternatives || [],
+    followUpQuestion: row.follow_up_question,
+    tags: row.tags || [],
+    level: row.level ?? 0,
+    dueAt: row.due_at,
+    reviewCount: row.review_count ?? 0,
+    lastGrade: row.last_grade,
+    createdAt: row.created_at,
+  };
+}
+
+function normalizeStringArray(value, max = 3) {
+  if (!Array.isArray(value)) return [];
+  return value.map((v) => String(v || "").trim()).filter(Boolean).slice(0, max);
+}
+
+function parseAiJson(text) {
+  const raw = String(text || "").trim();
+  try { return JSON.parse(raw); } catch {}
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (match) {
+    try { return JSON.parse(match[0]); } catch {}
+  }
+  return null;
+}
+
+function fallbackSpeakingDraft(input) {
+  const wanted = String(input.wantedKo || input.quickNote || "").trim();
+  return {
+    situation: String(input.situation || "A real conversation where you need to express this idea naturally.").trim(),
+    targetExpression: wanted ? `I want to say this clearly: ${wanted}` : "I want to explain my point clearly and politely.",
+    conciseExpression: "Let me put it this way.",
+    alternatives: ["What I mean is...", "I think we may need to look at this again."],
+    followUpQuestion: "Could you say a little more about what you mean?",
+    tags: normalizeStringArray(input.tags, 5),
+  };
+}
+
+async function createSpeakingDraft(input) {
+  if (!OPENAI_API_KEY) return fallbackSpeakingDraft(input);
+  const prompt = `Create ONE speaking-gap card for a Korean English learner. Return strict JSON only with keys: situation, targetExpression, conciseExpression, alternatives (1-2 strings), followUpQuestion, tags (1-5 short Korean labels). Do not provide many options. Focus on the user's intended meaning, not literal translation.\n\nUser note: ${input.quickNote || ""}\nSituation: ${input.situation || ""}\nWanted Korean: ${input.wantedKo || ""}\nActual English attempt: ${input.actualAttempt || ""}`;
+  const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${OPENAI_API_KEY}` },
+    body: JSON.stringify({ model: env("OPENAI_SPEAKING_MODEL") || "gpt-4o-mini", messages: [{ role: "user", content: prompt }], temperature: 0.4, response_format: { type: "json_object" } }),
+  });
+  if (!r.ok) return fallbackSpeakingDraft(input);
+  const data = await r.json();
+  const json = parseAiJson(data?.choices?.[0]?.message?.content);
+  return json ? { ...fallbackSpeakingDraft(input), ...json, alternatives: normalizeStringArray(json.alternatives, 2), tags: normalizeStringArray(json.tags, 5) } : fallbackSpeakingDraft(input);
+}
+
+function fallbackSpeakingFeedback(input) {
+  const seconds = Number(input.secondsToStart || 0);
+  return {
+    meaning: "meaning_check_needed",
+    naturalnessTip: "정답과 똑같이 말하기보다 핵심 의미가 전달됐는지 확인하세요.",
+    correctedExpression: input.targetExpression || "Try again with the target expression.",
+    recommendedGrade: seconds >= 8 ? "hard" : "good",
+    reason: seconds >= 8 ? "8초 이상 걸려 Hard를 추천합니다." : "도움 없이 의미를 전달했다면 Good을 추천합니다.",
+  };
+}
+
+async function createSpeakingFeedback(input) {
+  if (!OPENAI_API_KEY) return fallbackSpeakingFeedback(input);
+  const prompt = `Evaluate a spoken English answer by meaning, not exact match. Return strict JSON only: meaning (success/partial/missed), naturalnessTip (Korean, one useful correction only), correctedExpression, recommendedGrade (again/hard/good/easy), reason (Korean).\nSituation: ${input.situation}\nTarget: ${input.targetExpression}\nUser transcript: ${input.transcript}\nSeconds to start: ${input.secondsToStart}\nHint used: ${input.hintUsed}`;
+  const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${OPENAI_API_KEY}` },
+    body: JSON.stringify({ model: env("OPENAI_SPEAKING_MODEL") || "gpt-4o-mini", messages: [{ role: "user", content: prompt }], temperature: 0.2, response_format: { type: "json_object" } }),
+  });
+  if (!r.ok) return fallbackSpeakingFeedback(input);
+  const data = await r.json();
+  const json = parseAiJson(data?.choices?.[0]?.message?.content);
+  const out = json ? { ...fallbackSpeakingFeedback(input), ...json } : fallbackSpeakingFeedback(input);
+  if (!SPEAKING_GRADES.has(out.recommendedGrade)) out.recommendedGrade = "good";
+  return out;
+}
+
 function getSupabase() {
   const supabaseUrl = env("SUPABASE_URL");
   const supabaseServiceRoleKey = env("SUPABASE_SERVICE_ROLE_KEY");
@@ -311,6 +401,43 @@ async function handleReview(req, id) {
   return json({ ok: true });
 }
 
+async function handleSpeakingItems(req, url, id) {
+  const supabase = getSupabase();
+  if (req.method === "GET" && !id) {
+    let query = supabase.from("speaking_items").select("*");
+    if (url.searchParams.get("filter") === "due") query = query.lte("due_at", new Date().toISOString());
+    const q = (url.searchParams.get("q") || "").trim();
+    if (q) query = query.or(`situation.ilike.%${q}%,wanted_ko.ilike.%${q}%,target_expression.ilike.%${q}%`);
+    const sort = url.searchParams.get("sort") || "newest";
+    query = sort === "due" ? query.order("due_at", { ascending: true }) : query.order("created_at", { ascending: sort === "oldest" });
+    const { data, error } = await query;
+    if (error) return json({ error: error.message }, 500);
+    return json({ items: (data || []).map(speakingFromRow) });
+  }
+  if (req.method === "POST" && !id) {
+    const b = await req.json().catch(() => ({}));
+    if (!b.situation || !b.targetExpression) return json({ error: "situation/targetExpression required" }, 400);
+    const now = nowIso();
+    const { data, error } = await supabase.from("speaking_items").insert([{ situation: String(b.situation), wanted_ko: String(b.wantedKo || ""), actual_attempt: String(b.actualAttempt || ""), target_expression: String(b.targetExpression), concise_expression: String(b.conciseExpression || ""), alternatives: normalizeStringArray(b.alternatives, 2), follow_up_question: String(b.followUpQuestion || ""), tags: normalizeStringArray(b.tags, 5), level: 0, due_at: now, review_count: 0, updated_at: now }]).select("*").single();
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true, item: speakingFromRow(data) });
+  }
+  return json({ error: "not found" }, 404);
+}
+
+async function handleSpeakingReview(req, id) {
+  if (req.method !== "POST" || !id) return json({ error: "not found" }, 404);
+  const supabase = getSupabase();
+  const { grade = "good" } = await req.json().catch(() => ({}));
+  const { data: row, error: fetchError } = await supabase.from("speaking_items").select("id, level, due_at, review_count").eq("id", id).single();
+  if (fetchError || !row) return json({ error: "not found" }, 404);
+  const temp = { level: row.level ?? 0, dueAt: row.due_at, reviewCount: row.review_count ?? 0 };
+  srsUpdate(temp, String(grade));
+  const { error } = await supabase.from("speaking_items").update({ level: temp.level, due_at: temp.dueAt, review_count: temp.reviewCount, last_grade: String(grade), updated_at: nowIso() }).eq("id", id);
+  if (error) return json({ error: error.message }, 500);
+  return json({ ok: true });
+}
+
 export default async (req) => {
   if (req.method === "OPTIONS") return json({ ok: true });
 
@@ -323,6 +450,10 @@ export default async (req) => {
     if (resource === "caption") return handleCaption(url);
     if (resource === "segments") return handleSegments(req, url, id);
     if (resource === "review") return handleReview(req, id);
+    if (resource === "speaking" && id === "items") return handleSpeakingItems(req, url, parts[2]);
+    if (resource === "speaking" && id === "draft") return json(await createSpeakingDraft(await req.json().catch(() => ({}))));
+    if (resource === "speaking" && id === "feedback") return json(await createSpeakingFeedback(await req.json().catch(() => ({}))));
+    if (resource === "speaking" && id === "review") return handleSpeakingReview(req, parts[2]);
 
     return json({ error: "not found" }, 404);
   } catch (error) {
