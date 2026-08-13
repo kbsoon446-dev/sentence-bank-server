@@ -602,10 +602,53 @@ if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code
 
   if (!reviewActive) return;
 
-  if (e.key === "1") gradeCurrent("again");
-  if (e.key === "2") gradeCurrent("hard");
-  if (e.key === "3") gradeCurrent("good");
-  if (e.key === "4") gradeCurrent("easy");
+// 일반 숫자키 / 숫자패드 / 매크로 키보드 대응
+const pressedKeys = [
+  String(e.key || ""),
+  String(e.code || ""),
+  String(e.keyCode || ""),
+  String(e.which || "")
+];
+
+const gradeMap = {
+  "1": "again",
+  "Digit1": "again",
+  "Numpad1": "again",
+  "49": "again",
+  "97": "again",
+
+  "2": "hard",
+  "Digit2": "hard",
+  "Numpad2": "hard",
+  "50": "hard",
+  "98": "hard",
+
+  "3": "good",
+  "Digit3": "good",
+  "Numpad3": "good",
+  "51": "good",
+  "99": "good",
+
+  "4": "easy",
+  "Digit4": "easy",
+  "Numpad4": "easy",
+  "52": "easy",
+  "100": "easy"
+};
+
+let grade = null;
+
+for (const key of pressedKeys) {
+  if (gradeMap[key]) {
+    grade = gradeMap[key];
+    break;
+  }
+}
+
+if (grade) {
+  e.preventDefault();
+  gradeCurrent(grade);
+}
 });
 
 // UI handlers
