@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Speaking Gap Standalone</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/speaking.css" />
+</head>
+<body>
+  <header class="header speakingHero">
+    <div>
+      <p class="eyebrow">Speaking Gap · situation first</p>
+      <h1>How do I say this?</h1>
+      <div class="sub">듣기 앱과 분리된 독립 말하기 앱입니다. 실제로 못 했던 말을 다음 상황에서 바로 꺼내는 훈련만 다룹니다.</div>
+    </div>
+    <div class="heroActions"><button id="btnHeroReview" class="btn primary">오늘 복습 시작</button></div>
+  </header>
+
+  <main class="container speakingGrid">
+    <section class="card homeCard">
+      <div class="row between"><h2>홈</h2><span id="homeDue" class="badge">Due 0</span></div>
+      <div class="homeActions">
+        <button id="btnFocusCapture" class="bigAction">+ 방금 못 한 말 저장</button>
+        <button id="btnHomeReview" class="bigAction secondary">오늘 복습 시작</button>
+        <button id="btnMission" class="bigAction secondary">실전 대화 테스트</button>
+      </div>
+      <div class="miniGrid"><div><b>오늘 복습할 말</b><div id="duePreview" class="muted">불러오는 중...</div></div><div><b>최근 저장한 못 한 말</b><div id="recentPreview" class="muted">불러오는 중...</div></div></div>
+    </section>
+
+    <section class="card captureCard" id="captureCard">
+      <h2>+ 방금 못 한 말 저장</h2>
+      <p class="muted">정리하지 말고 한국어로 대충 적으세요. AI는 실제로 쓸 기본 문장 1개와 대안 1~2개만 남깁니다.</p>
+      <label class="field"><div class="label">빠른 메모</div><textarea id="quickNote" rows="3" placeholder="오늘 회의에서 데이터가 아직 부족해서 결론 내리기 이르다고 말하고 싶었음"></textarea></label>
+      <label class="field"><div class="label">어떤 상황이었나요?</div><textarea id="situation" rows="2"></textarea></label>
+      <label class="field"><div class="label">무슨 말을 하고 싶었나요?</div><textarea id="wantedKo" rows="2"></textarea></label>
+      <label class="field"><div class="label">실제로 영어로 어떻게 말했나요? (선택)</div><input id="actualAttempt" /></label>
+      <div class="row"><button id="btnDraft" class="btn primary">AI 추천 표현 만들기</button><button id="btnSaveSpeaking" class="btn">내 기본 표현으로 저장</button></div>
+      <div id="draft" class="draftBox muted">AI가 상황·핵심 의도·기본 표현·후속 질문을 생성합니다.</div>
+    </section>
+
+    <section class="card reviewCard">
+      <div class="row between"><h2>상황 시뮬레이션 복습</h2><button id="btnLoadDue" class="btn">Due 불러오기</button></div>
+      <div class="stats" id="speakingStats"></div>
+      <div id="reviewPane" class="reviewPane muted">영어 정답 없이 상황만 보고 말합니다. 피드백 후에는 수정된 문장을 한 번 더 말해야 등급 버튼이 열립니다.</div>
+      <div class="prepBar"><span>준비 시간</span><strong id="prepCountdown">5</strong></div>
+      <div class="row"><button id="btnStartReview" class="btn primary">오늘 복습 시작</button><button id="btnHint" class="btn">단계별 힌트</button><button id="btnRevealSpeaking" class="btn">Reveal</button></div>
+      <div class="row"><button id="btnRecord" class="btn danger">1차 말하기 녹음/인식</button><span id="timer" class="badge">0.0s</span></div>
+      <label class="field"><div class="label">내 답변(음성인식 또는 직접 입력)</div><textarea id="transcript" rows="2"></textarea></label>
+      <div class="row"><button id="btnFeedback" class="btn primary">의미 중심 피드백</button><button id="btnRecordRetry" class="btn" disabled>수정 문장 다시 말하기</button></div>
+      <div id="feedback" class="feedback muted">정확히 일치했는지가 아니라 의미 전달, 시작 시간, 힌트 사용, 자연스러움을 봅니다.</div>
+      <div id="variation" class="variation muted"></div>
+      <div class="row gradeRow"><button id="btnAgain" class="btn" disabled>Again</button><button id="btnHard" class="btn" disabled>Hard</button><button id="btnGood" class="btn" disabled>Good</button><button id="btnEasy" class="btn" disabled>Easy</button></div>
+    </section>
+
+    <section class="card libraryCard">
+      <div class="row between"><h2>표현 보관함</h2><select id="speakingSort" class="select"><option value="newest">최신순</option><option value="due">복습 예정순</option><option value="oldest">오래된순</option></select></div>
+      <div class="row"><input id="speakingQ" class="search" placeholder="상황 / 표현 검색" /><button id="btnRefreshSpeaking" class="btn">검색</button></div>
+      <div id="speakingList" class="list"></div>
+    </section>
+  </main>
+  <script src="/speaking.js"></script>
+</body>
+</html>

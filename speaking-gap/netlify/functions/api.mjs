@@ -479,6 +479,11 @@ export default async (req) => {
     if (resource === "caption") return handleCaption(url);
     if (resource === "segments") return handleSegments(req, url, id);
     if (resource === "review") return handleReview(req, id);
+    if (resource === "speaking" && id === "items") return handleSpeakingItems(req, url, parts[2]);
+    if (resource === "speaking" && id === "draft") return json(await createSpeakingDraft(await req.json().catch(() => ({}))));
+    if (resource === "speaking" && id === "feedback") return json(await createSpeakingFeedback(await req.json().catch(() => ({}))));
+    if (resource === "speaking" && id === "variation") return json(await createSpeakingVariation(await req.json().catch(() => ({}))));
+    if (resource === "speaking" && id === "review") return handleSpeakingReview(req, parts[2]);
 
     return json({ error: "not found" }, 404);
   } catch (error) {
