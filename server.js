@@ -674,8 +674,9 @@ function parseAiJson(text) {
 function fallbackSpeakingDraft(input) {
   const wanted = String(input.wantedKo || input.quickNote || "").trim();
   return {
-    situation: String(input.situation || "A real conversation where you need to express this idea naturally.").trim(),
-    targetExpression: wanted ? `I want to say this clearly: ${wanted}` : "I want to explain my point clearly and politely.",
+    situation: String(input.situation || "A real conversation where someone expects your response.").trim(),
+    intentKo: wanted || "상황에 맞게 내 의도를 정중하고 자연스럽게 전달하기",
+    targetExpression: wanted ? "I think it’s still too early to draw a conclusion because we don’t have enough information yet." : "I want to explain my point clearly and politely.",
     conciseExpression: "Let me put it this way.",
     alternatives: ["What I mean is...", "I think we may need to look at this again."],
     followUpQuestion: "Could you say a little more about what you mean?",
@@ -685,7 +686,12 @@ function fallbackSpeakingDraft(input) {
 
 async function createSpeakingDraft(input) {
   if (!OPENAI_API_KEY) return fallbackSpeakingDraft(input);
-  const prompt = `Create ONE speaking-gap card for a Korean English learner. Return strict JSON only with keys: situation, targetExpression, conciseExpression, alternatives (1-2 strings), followUpQuestion, tags (1-5 short Korean labels). Do not provide many options. Focus on the user's intended meaning, not literal translation.\n\nUser note: ${input.quickNote || ""}\nSituation: ${input.situation || ""}\nWanted Korean: ${input.wantedKo || ""}\nActual English attempt: ${input.actualAttempt || ""}`;
+  const prompt = `Create ONE speaking-gap card for a Korean English learner. Return strict JSON only with keys: situation, intentKo, targetExpression, conciseExpression, alternatives (1-2 strings), followUpQuestion, tags (1-5 short Korean labels). Do not provide many options. Do not make a Korean-to-English flashcard. Convert the user's failed real-life speaking moment into a situation simulation: what is happening, what the learner wants to do pragmatically, one default sentence they would actually say, one concise alternative, and at most two other usable expressions. Focus on intended meaning, politeness, and production in conversation.
+
+User note: ${input.quickNote || ""}
+Situation: ${input.situation || ""}
+Wanted Korean: ${input.wantedKo || ""}
+Actual English attempt: ${input.actualAttempt || ""}`;
   const r = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${OPENAI_API_KEY}` },
@@ -710,7 +716,13 @@ function fallbackSpeakingFeedback(input) {
 
 async function createSpeakingFeedback(input) {
   if (!OPENAI_API_KEY) return fallbackSpeakingFeedback(input);
-  const prompt = `Evaluate a spoken English answer by meaning, not exact match. Return strict JSON only: meaning (success/partial/missed), naturalnessTip (Korean, one useful correction only), correctedExpression, recommendedGrade (again/hard/good/easy), reason (Korean).\nSituation: ${input.situation}\nTarget: ${input.targetExpression}\nUser transcript: ${input.transcript}\nSeconds to start: ${input.secondsToStart}\nHint used: ${input.hintUsed}`;
+  const prompt = `Evaluate a spoken English answer by meaning, not exact match. Return strict JSON only: meaning (success/partial/missed), naturalnessTip (Korean, one useful correction only), correctedExpression, recommendedGrade (again/hard/good/easy), reason (Korean). Speaking grade rules: again = could not start or saw the answer first; hard = used a hint or took 8+ seconds; good = conveyed the intended meaning without help; easy = natural and ready for a follow-up question. Mention whether the intended meaning was included, whether grammar blocked understanding, and whether it sounds natural in real conversation.
+Situation: ${input.situation}
+Target: ${input.targetExpression}
+User transcript: ${input.transcript}
+Seconds to start: ${input.secondsToStart}
+Hint used: ${input.hintUsed}
+Revealed before answer: ${input.revealedBeforeAnswer}`;
   const r = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${OPENAI_API_KEY}` },
@@ -722,6 +734,30 @@ async function createSpeakingFeedback(input) {
   const out = json ? { ...fallbackSpeakingFeedback(input), ...json } : fallbackSpeakingFeedback(input);
   if (!SPEAKING_GRADES.has(out.recommendedGrade)) out.recommendedGrade = "good";
   return out;
+}
+
+function fallbackSpeakingVariation(input) {
+  return {
+    variationPrompt: `상황을 조금 바꿔서 다시 말하세요: ${input.followUpQuestion || input.situation || "상대방이 이유를 더 물어봅니다."}`,
+    sampleAnswer: input.conciseExpression || input.targetExpression || "Let me explain that another way.",
+  };
+}
+
+async function createSpeakingVariation(input) {
+  if (!OPENAI_API_KEY) return fallbackSpeakingVariation(input);
+  const prompt = `Create one variation speaking prompt so the learner cannot merely repeat the exact same sentence. Return strict JSON only: variationPrompt (Korean), sampleAnswer (English). Reuse the useful chunks from the target expression, but alter tense, reason, stakeholder, or follow-up question. Keep it practical and short.
+Situation: ${input.situation}
+Target: ${input.targetExpression}
+Alternatives: ${(input.alternatives || []).join(" | ")}
+Review count: ${input.reviewCount || 0}`;
+  const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${OPENAI_API_KEY}` },
+    body: JSON.stringify({ model: process.env.OPENAI_SPEAKING_MODEL || "gpt-4o-mini", messages: [{ role: "user", content: prompt }], temperature: 0.35, response_format: { type: "json_object" } }),
+  });
+  if (!r.ok) return fallbackSpeakingVariation(input);
+  const data = await r.json();
+  return parseAiJson(data?.choices?.[0]?.message?.content) || fallbackSpeakingVariation(input);
 }
 
 app.get("/api/health", (req, res) => {
@@ -938,6 +974,11 @@ app.post("/api/speaking/items", async (req, res) => {
 
 app.post("/api/speaking/feedback", async (req, res) => {
   try { res.json(await createSpeakingFeedback(req.body || {})); }
+  catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+});
+
+app.post("/api/speaking/variation", async (req, res) => {
+  try { res.json(await createSpeakingVariation(req.body || {})); }
   catch (e) { res.status(500).json({ error: String(e.message || e) }); }
 });
 

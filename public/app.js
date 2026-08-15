@@ -219,12 +219,17 @@ function renderList() {
           <button class="btn" data-act="review">Review</button>
           <button class="btn" data-act="del">Delete</button>
           <button class="btn" data-act="edit">Edit</button> <!-- ✅ 수정 버튼 추가 -->
+          <button class="btn" data-act="speak">말하기에 추가</button>
         </div>
       </div>
     `;
 
     el.querySelector('[data-act="play"]').onclick = () => playSegmentByIndex(i);
     el.querySelector('[data-act="review"]').onclick = () => startSingleReview(seg.id);
+    el.querySelector('[data-act="speak"]').onclick = () => {
+      const sourceText = encodeURIComponent(seg.text || seg.note || "");
+      window.open(`/speaking.html?sourceText=${sourceText}`, "_blank");
+    };
     el.querySelector('[data-act="del"]').onclick = async () => {
       if (!confirm("Delete this segment?")) return;
       await fetch(`https://sentence-bank-server.onrender.com/api/segments/${encodeURIComponent(seg.id)}`, { method: "DELETE" });
